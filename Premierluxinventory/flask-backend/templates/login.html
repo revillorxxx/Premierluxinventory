@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Premierlux Inventory – Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gradient-to-br from-slate-100 to-slate-200 min-h-screen flex items-center justify-center">
+
+  <div class="bg-white/90 rounded-2xl shadow-2xl p-8 w-full max-w-sm border border-slate-200">
+    <h1 class="text-xl font-semibold text-slate-800 mb-2 text-center">
+      Premierlux Inventory
+    </h1>
+    <p class="text-xs text-slate-500 mb-5 text-center">
+      Sign in to access the dashboard.
+    </p>
+
+    <div class="space-y-4">
+      <div>
+        <label class="text-xs text-slate-500">Email</label>
+        <input id="loginEmail" type="email"
+          class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-slate-800"
+          placeholder="admin@example.com">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">Password</label>
+        <input id="loginPassword" type="password"
+          class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-slate-800"
+          placeholder="••••••••">
+      </div>
+      <p id="loginError" class="text-xs text-red-500 hidden"></p>
+      <button id="loginBtn"
+        class="w-full mt-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium hover:bg-slate-800">
+        Sign in
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:5000";
+
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value.trim();
+      const errEl = document.getElementById('loginError');
+      errEl.classList.add('hidden');
+
+      if (!email || !password) {
+        errEl.textContent = "Please enter email and password.";
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          errEl.textContent = data.error || "Login failed.";
+          errEl.classList.remove('hidden');
+          return;
+        }
+        // Redirect to the root route (Flask handles serving index.html)
+        window.location.href = "/";
+      } catch (e) {
+        errEl.textContent = "Network error. Please try again.";
+        errEl.classList.remove('hidden');
+      }
+    });
+
+    const AUTH_API = `${API_BASE}/api`;
+
+    // ==========================================
+    // 11. AUTHENTICATION & LOGOUT
+    // ==========================================
+
+    async function doLogout() {
+      try {
+        // 1. Tell Backend to clear session
+        await fetch(`${API_BASE}/api/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (e) {
+        console.error("Logout error", e);
+      } finally {
+        // 2. Redirect User to the Login Page
+        // This "wires" the dashboard back to the login screen
+        window.location.href = "/login";
+      }
+    }
+  </script>
+</body>
+
+</html>
