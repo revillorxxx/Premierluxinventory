@@ -451,9 +451,17 @@ def get_ai_dashboard():
 # 🤖 LUX CHATBOT (Powered by Groq Llama 3)
 # ==========================================
 
+# // //////////////////////////////////////// //
+# //      🤖 LUX CHATBOT (FIXED VERSION)       //
+# // //////////////////////////////////////// //
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
+        # 1. SETUP GROQ CLIENT
+        # We use the global GROQ_API_KEY defined at the top of app.py
+        # to ensure it can be updated via Render Environment Variables.
+        ai_client = Groq(api_key=GROQ_API_KEY)
 
         data = request.json or {}
         user_message = data.get("message", "").strip()
@@ -523,7 +531,7 @@ def chat():
             model_to_use = "llama-3.3-70b-versatile"
 
         # 6. CALL GROQ API
-        completion = client.chat.completions.create(
+        completion = ai_client.chat.completions.create(
             model=model_to_use,
             messages=messages,
             temperature=0.5,
@@ -538,6 +546,7 @@ def chat():
         }), 200
 
     except Exception as e:
+        # If this fails, check the Render Logs for the exact error message
         print(f"LUX Error: {e}")
         return jsonify({
             "type": "error", 
@@ -1515,3 +1524,4 @@ if __name__ == "__main__":
     # This block only runs for local testing
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False)
+
