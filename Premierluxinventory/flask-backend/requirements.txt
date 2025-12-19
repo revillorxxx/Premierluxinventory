@@ -1,7 +1,0 @@
-flask
-pymongo
-flask-cors
-statsmodels
-requests
-gunicorn
-eventlet
