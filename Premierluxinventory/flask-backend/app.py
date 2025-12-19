@@ -1449,13 +1449,13 @@ def ai_analyze_inventory():
         }), 200
     
 # // ////////////////////////////////////////////////////// //
-# //      🧠 LUX MARKET INTELLIGENCE (SUPPLIER SPECIFIC)      //
+# //      🧠 LUX MARKET INTELLIGENCE (FIXED VERSION)          //
 # // ////////////////////////////////////////////////////// //
 
 @app.route('/api/ai/market-intelligence', methods=['GET'])
 def ai_market_intelligence():
     try:
-        # 1. Group price history by Item + Supplier (formerly supplier_batch)
+        # 1. Group price history by Item + Supplier
         pipeline = [
             {"$sort": {"mfg_date": 1}},
             {"$group": {
@@ -1472,8 +1472,12 @@ def ai_market_intelligence():
         market_data = list(batches_collection.aggregate(pipeline))
         data_str = json.dumps(market_data)
 
+        # 2. LUX Analysis via Groq
+        # ➤ FIX: We use 'groq_client' instead of 'client' to avoid MongoDB conflict.
+        # We also use the global GROQ_API_KEY defined at the top of app.py.
+        groq_client = Groq(api_key=GROQ_API_KEY)
         
-        completion = client.chat.completions.create(
+        completion = groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system", 
@@ -1505,9 +1509,12 @@ def ai_market_intelligence():
             response_format={"type": "json_object"}
         )
 
-        return jsonify(json.loads(completion.choices[0].message.content)), 200
+        # 3. Parse and Return
+        result = json.loads(completion.choices[0].message.content)
+        return jsonify(result), 200
 
     except Exception as e:
+        # This will now print the real error if anything else goes wrong
         print(f"LUX Market Error: {e}")
         return jsonify({"error": "LUX is currently analyzing supplier catalogs."}), 500
 # ---------- Run server ----------
@@ -1524,4 +1531,5 @@ if __name__ == "__main__":
     # This block only runs for local testing
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False)
+
 
