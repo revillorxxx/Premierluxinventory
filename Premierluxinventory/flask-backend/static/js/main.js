@@ -6,7 +6,7 @@
 let currentUserRole = 'admin';
 
 // --- API CONFIGURATION ---
-const API_BASE = "http://127.0.0.1:5000";
+const API_BASE = "https://premierluxinventory.onrender.com";
 const API_URL = `${API_BASE}/api/inventory`;
 const BRANCHES_API_URL = `${API_BASE}/api/branches`;
 const ALERTS_API_URL = `${API_BASE}/api/alerts`;
@@ -3455,4 +3455,5 @@ async function fetchPriceInsights() {
         if (summaryEl) summaryEl.innerHTML = "LUX is currently calculating trends...";
     }
 }
+
 
