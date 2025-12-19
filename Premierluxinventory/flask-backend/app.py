@@ -1503,10 +1503,15 @@ def ai_market_intelligence():
         return jsonify({"error": "LUX is currently analyzing supplier catalogs."}), 500
 # ---------- Run server ----------
 
+def start_background_tasks():
+    print("LUX: Starting background analytics broadcaster...")
+    # ➤ FIX: Use socketio.start_background_task instead of threading.Thread
+    socketio.start_background_task(target=analytics_broadcaster)
+
+# We start it globally so Gunicorn catches it
+start_background_tasks()
+
 if __name__ == "__main__":
-    # Start your background analytics thread
-    t = threading.Thread(target=analytics_broadcaster, daemon=True)
-    t.start()
-    
+    # This block only runs for local testing
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False)
