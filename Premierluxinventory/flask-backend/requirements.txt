@@ -1,0 +1,9 @@
+flask
+pymongo
+flask-cors
+statsmodels
+requests
+flask-socketio
+eventlet
+gunicorn
+groq
