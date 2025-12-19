@@ -3013,7 +3013,8 @@ function downloadSystemBackup() {
 // --- SOCKET LISTENERS FOR GOVERNANCE ---
 // Add this inside your existing socket initialization or at the bottom of the file
 
-const governanceSocket = io(API_BASE); // Connect to default namespace
+const governanceSocket = io("https://premierluxinventory.onrender.com");
+
 
 // 1. Listen for Broadcasts
 governanceSocket.on('system_broadcast', (data) => {
@@ -3455,5 +3456,6 @@ async function fetchPriceInsights() {
         if (summaryEl) summaryEl.innerHTML = "LUX is currently calculating trends...";
     }
 }
+
 
 
