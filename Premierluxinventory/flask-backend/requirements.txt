@@ -7,3 +7,4 @@ flask-socketio
 eventlet
 gunicorn
 groq
+dnspython
