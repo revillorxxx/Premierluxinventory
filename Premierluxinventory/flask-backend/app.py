@@ -454,10 +454,6 @@ def get_ai_dashboard():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
-        # 1. SETUP GROQ CLIENT
-        # Paste your Groq API Key here
-        GROQ_API_KEY = "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"
-        client = Groq(api_key=GROQ_API_KEY)
 
         data = request.json or {}
         user_message = data.get("message", "").strip()
@@ -1364,10 +1360,6 @@ from groq import Groq # <--- ADD THIS TO IMPORTS
 @app.route('/api/ai/analyze', methods=['GET'])
 def ai_analyze_inventory():
     try:
-        # 1. SETUP CLIENT (Paste your key directly here for testing)
-        # REPLACE 'gsk_...' with your actual key inside the quotes
-        GROQ_API_KEY = "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" 
-        
         if not GROQ_API_KEY or "YOUR_ACTUAL" in GROQ_API_KEY:
              return jsonify({
                 "insight_text": "Configuration Error: Groq API Key is missing in app.py.",
@@ -1471,9 +1463,6 @@ def ai_market_intelligence():
         market_data = list(batches_collection.aggregate(pipeline))
         data_str = json.dumps(market_data)
 
-        # 2. LUX Analysis via Groq
-        GROQ_API_KEY = "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" 
-        client = Groq(api_key=GROQ_API_KEY)
         
         completion = client.chat.completions.create(
             messages=[
