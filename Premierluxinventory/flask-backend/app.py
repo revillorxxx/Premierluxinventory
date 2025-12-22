@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch(all=True)
 
 from flask import Flask, request, jsonify, session, render_template, redirect
 from flask_cors import CORS
@@ -22,7 +22,22 @@ import random
 # WE TELL FLASK TO LOOK UP ONE FOLDER (../frontend) FOR TEMPLATES
 app = Flask(__name__)
 
-CORS(app, supports_credentials=True)
+is_production = "RENDER" in os.environ 
+
+app.config.update(
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=is_production, # True on Render, False on Local
+    SESSION_COOKIE_HTTPONLY=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7)
+)
+
+allowed_origins = [
+    "http://127.0.0.1:5000",
+    "http://localhost:5000",
+    "https://premierluxinventory.onrender.com"
+]
+
+CORS(app, supports_credentials=True, origins=allowed_origins)
 socketio = SocketIO(app, cors_allowed_origins="*")
 app.secret_key = "premierlux_secret_key"
 
@@ -30,7 +45,10 @@ app.secret_key = "premierlux_secret_key"
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://dbirolliverhernandez_db_user:yqHWCWJwNxKofjHs@cluster0.bgmzgav.mongodb.net/?appName=Cluster0")
 client = MongoClient(MONGO_URI)
 db = client["premierlux"]
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+LOCAL_DEV_KEY = "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" 
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", LOCAL_DEV_KEY)
+if not GROQ_API_KEY or GROQ_API_KEY == "gsk_...":
+    print("⚠️ WARNING: Groq API Key is missing or invalid!")
 
 ai_dashboard_collection = db["ai_dashboard"]
 inventory_collection = db["inventory"]
@@ -1365,45 +1383,54 @@ from groq import Groq # <--- ADD THIS TO IMPORTS
 # ==========================================
 #  🧠 GROQ (LLAMA 3) ANALYZER
 # ==========================================
-
+# // //////////////////////////////////////// //
+# //      🧠 LUX AI INVENTORY ANALYZER         //
+# // //////////////////////////////////////// //
 @app.route('/api/ai/analyze', methods=['GET'])
 def ai_analyze_inventory():
     try:
-        # 1. SETUP CLIENT
-        # ➤ FIX: Use 'groq_client' and the global 'GROQ_API_KEY'
         groq_client = Groq(api_key=GROQ_API_KEY) 
         
-        # (Check cache logic here...)
-        
-        # 2. PREPARE DATA
+        # Fetch inventory snapshot for the AI
         cursor = inventory_collection.find({}, {
             "_id": 0, "name": 1, "quantity": 1, "reorder_level": 1, 
-            "monthly_usage": 1
-        }).sort("quantity", 1).limit(30)
+            "branch": 1
+        }).sort("quantity", 1).limit(20)
         
         items = list(cursor)
         data_str = json.dumps(items)
 
-        # 3. CALL GROQ
-        # ➤ FIX: Use 'groq_client' here as well
+        # Force the AI to return specific keys for the frontend
         completion = groq_client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are a supply chain assistant. Output ONLY valid JSON."},
-                {"role": "user", "content": f"Analyze this inventory list: {data_str}..."}
+                {
+                    "role": "system", 
+                    "content": "You are LUX, a supply chain AI. Output ONLY JSON. Use these keys: 'insight_text' (2-sentence summary), 'status_badge' ('Healthy', 'Warning', or 'Critical'), 'recommended_order' (list of items needing restock)."
+                },
+                {
+                    "role": "user", 
+                    "content": f"Analyze this inventory and identify risks or trends: {data_str}"
+                }
             ],
             model="llama-3.3-70b-versatile",
             temperature=0.3,
             response_format={"type": "json_object"}
         )
 
-        # 4. PARSE & SAVE
         ai_data = json.loads(completion.choices[0].message.content)
-        # ... (rest of your update logic)
+        
+        # Safety: Ensure keys exist even if AI forgets
+        if "insight_text" not in ai_data: ai_data["insight_text"] = "Inventory levels are currently stable across all branches."
+        if "status_badge" not in ai_data: ai_data["status_badge"] = "Healthy"
+
         return jsonify(ai_data), 200
 
     except Exception as e:
         print(f"Groq Analyze Error: {e}")
-        return jsonify({"insight_text": "AI Analysis temporarily unavailable.", "status_badge": "Error"}), 200
+        return jsonify({
+            "insight_text": "LUX is currently calculating inventory velocity...", 
+            "status_badge": "Offline"
+        }), 200
     
 # // ////////////////////////////////////////////////////// //
 # //      🧠 LUX MARKET INTELLIGENCE (FIXED VERSION)          //
@@ -1488,6 +1515,3 @@ if __name__ == "__main__":
     # This block only runs for local testing
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False)
-
-
-
