@@ -416,7 +416,9 @@
   </div>
 
   <script>
-    const API_BASE = "https://premierluxinventory.onrender.com";
+    const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ? "" 
+      : "https://premierluxinventory.onrender.com";
 
     // --- PASSWORD TOGGLE LOGIC ---
     const passInput = document.getElementById('loginPassword');
@@ -481,6 +483,7 @@
         const res = await fetch(`${API_BASE}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ email, password })
         });
 
