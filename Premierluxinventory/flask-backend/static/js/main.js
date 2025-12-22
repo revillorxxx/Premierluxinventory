@@ -2,11 +2,14 @@
  * PREMIERLUX INVENTORY SYSTEM - MAIN LOGIC
  * Consolidated & Cleaned Version
  */
-
+let currentLuxImageBase64 = null;
 let currentUserRole = 'admin';
 
 // --- API CONFIGURATION ---
-const API_BASE = "https://premierluxinventory.onrender.com";
+const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? ""
+    : "https://premierluxinventory.onrender.com";
+
 const API_URL = `${API_BASE}/api/inventory`;
 const BRANCHES_API_URL = `${API_BASE}/api/branches`;
 const ALERTS_API_URL = `${API_BASE}/api/alerts`;
@@ -168,23 +171,7 @@ function showPage(page) {
 // Init on Load
 window.onload = function () {
 
-    // --- 1. SESSION CHECK (Main.js Only Version) ---
-    // We check if the session is active OR if the user just arrived from the login page.
-    const isActive = sessionStorage.getItem("isActiveSession");
-    const cameFromLogin = document.referrer.includes("/login");
-
     checkCurrentUser();
-
-    if (cameFromLogin || isActive) {
-        // If they just logged in, or already have a tab open, mark this window as safe.
-        sessionStorage.setItem("isActiveSession", "true");
-    } else {
-        // If they opened the browser fresh (no flag, didn't come from login), force logout.
-        console.log("Session invalid or browser closed. Logging out...");
-        doLogout();
-        return; // Stop loading the dashboard
-    }
-    // ----------------------------------------------
 
     // 2. Attach listener for Add Branch
     const addBranchBtn = document.getElementById('addBranchBtn');
@@ -205,63 +192,86 @@ window.onload = function () {
 // 3. DASHBOARD LOGIC
 // ==========================================
 
+
 async function initDashboard() {
     console.log("Initializing Dashboard...");
     try {
+        // 1. Fetch data from all necessary endpoints simultaneously
         const [invRes, branchRes, aiRes] = await Promise.all([
             fetch(API_URL).then(r => r.json()),
             fetch(BRANCHES_API_URL).then(r => r.json()),
             fetch(`${API_BASE}/api/ai/dashboard`).then(r => r.json())
         ]);
 
-        // KPIs
+        // 2. Perform Calculations
         const totalValue = invRes.reduce((acc, item) => acc + ((item.price || 0) * (item.quantity || 0)), 0);
         const lowStockItems = invRes.filter(item => (item.quantity || 0) <= (item.reorder_level || 0));
-        const expiringCount = window.bellState.expiringItems.length;
+        const expiringCount = window.bellState?.expiringItems?.length || 0;
 
-        document.getElementById('dash-total-value').textContent = `₱${totalValue.toLocaleString('en-PH', { maximumFractionDigits: 0 })}`;
-        document.getElementById('dash-low-stock').textContent = lowStockItems.length;
-        document.getElementById('dash-expiring').textContent = expiringCount;
-        document.getElementById('dash-branches').textContent = branchRes.length;
-        document.getElementById('dash-timestamp').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const els = {
+            total: document.getElementById('dash-total-value'),
+            low: document.getElementById('dash-low-stock'),
+            expiring: document.getElementById('dash-expiring'),
+            branches: document.getElementById('dash-branches'),
+            time: document.getElementById('dash-timestamp')
+        };
 
-        // AI Card
-        if (aiRes) applyAiDashboardToCards(aiRes);
+        if (els.total) els.total.textContent = `₱${totalValue.toLocaleString('en-PH', { maximumFractionDigits: 0 })}`;
+        if (els.low) els.low.textContent = lowStockItems.length;
+        if (els.expiring) els.expiring.textContent = expiringCount;
+        if (els.branches) els.branches.textContent = branchRes.length;
+        if (els.time) els.time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        // Restock Table (Top 5 Critical)
+        if (aiRes && typeof applyAiDashboardToCards === 'function') {
+            applyAiDashboardToCards(aiRes);
+        }
+
         const restockTable = document.getElementById('dash-restock-table');
         if (restockTable) {
             restockTable.innerHTML = '';
+
+
             const criticalItems = lowStockItems
                 .sort((a, b) => ((a.quantity - a.reorder_level) - (b.quantity - b.reorder_level)))
                 .slice(0, 5);
 
-            criticalItems.forEach(item => {
-                const row = `
-                <tr class="border-b border-slate-50 last:border-0 transition-colors duration-200 hover:bg-emerald-50/50">
-                    <td class="px-6 py-3 font-medium text-slate-700">${item.name}</td>
-                    <td class="px-6 py-3 text-xs text-slate-500">${item.branch}</td>
-                    <td class="px-6 py-3 text-right font-bold text-rose-600">${item.quantity}</td>
-                    <td class="px-6 py-3 text-center">
-<button onclick="openRestockModal('${item.name.replace(/'/g, "\\'")}', '${item.branch}', ${item.quantity})" 
-    class="bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 shadow-sm active:scale-95">
-    Restock
-</button>
-                    </td>
-                </tr>`;
-                restockTable.innerHTML += row;
-            });
+            if (criticalItems.length === 0) {
+                restockTable.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs font-medium">✅ All stock levels healthy</td></tr>`;
+            } else {
+                // //////////////////////////////////////// //
+                //      THEMED DASHBOARD RESTOCK TABLE        //
+                // //////////////////////////////////////// //
+                // Inside your initDashboard() function:
+                criticalItems.forEach(item => {
+                    const row = `
+    <tr class="border-b border-slate-50 last:border-0 transition-colors hover:bg-brand-50/50">
+        <td class="px-4 md:px-6 py-3">
+            <div class="font-bold text-slate-700 text-sm">${item.name}</div>
+            <div class="md:hidden text-[10px] text-slate-400 font-medium">${item.branch}</div> 
+        </td>
+        <td class="hidden md:table-cell px-6 py-3 text-xs text-slate-500">${item.branch}</td> 
+        <td class="px-4 md:px-6 py-3 text-right font-bold text-rose-600">${item.quantity}</td>
+        <td class="px-4 md:px-6 py-3 text-center">
+            <button onclick="openRestockModal('${item.name.replace(/'/g, "\\'")}', '${item.branch}', ${item.quantity})" 
+                class="bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white px-3 py-1.5 rounded-lg text-[10px] font-bold transition shadow-sm">
+                Restock
+            </button>
+        </td>
+    </tr>`;
+                    restockTable.innerHTML += row;
+                });
+            }
         }
 
-        // Charts
-        renderGradientBranchChart(invRes);
-        renderCategoryDoughnut(invRes);
-        initAIModule();
+        if (typeof renderGradientBranchChart === 'function') renderGradientBranchChart(invRes);
+        if (typeof renderCategoryDoughnut === 'function') renderCategoryDoughnut(invRes);
+        if (typeof initAIModule === 'function') initAIModule();
 
     } catch (err) {
         console.error("Dashboard Init Error:", err);
     }
 }
+
 
 // Gradient Bar Chart
 function renderGradientBranchChart(inventory) {
@@ -380,31 +390,26 @@ function renderCategoryDoughnut(inventory) {
 }
 
 
-// ==========================================
-// 4. INVENTORY LOGIC & CARDS
-// ==========================================
-
 function fetchInventory() {
-    const search = document.getElementById('inventorySearch').value;
-    const branch = document.getElementById('branchFilter').value; // Ensure this input exists
+    // ➤ FIX: Safe access to search and branch elements
+    const searchEl = document.getElementById('inventorySearch');
+    const branchEl = document.getElementById('branchFilter');
 
-    // Show loading state if needed
-    const grid = document.getElementById('inventoryCards');
-    if (grid) grid.innerHTML = '<div class="col-span-full text-center text-slate-400 py-10">Loading inventory...</div>';
+    const search = searchEl ? searchEl.value : '';
+    const branch = branchEl ? branchEl.value : 'All';
 
     let url = `${API_URL}?q=${encodeURIComponent(search)}`;
-    if (branch && branch !== 'All') {
-        url += `&branch=${encodeURIComponent(branch)}`;
-    }
+    if (branch !== 'All') url += `&branch=${encodeURIComponent(branch)}`;
 
     fetch(url)
         .then(res => res.json())
-        .then(data => {
-            renderInventoryCards(data); // Draw the cards first
-        })
-        .catch(err => console.error("Error loading inventory:", err));
+        .then(data => renderInventoryCards(data))
+        .catch(err => console.error("Inventory Fetch Error:", err));
 }
 
+// //////////////////////////////////////// //
+//      COMPACT & THEMED INVENTORY CARDS      //
+// //////////////////////////////////////// //
 function renderInventoryCards(items) {
     const container = document.getElementById('inventoryCards');
     const emptyState = document.getElementById('inventoryEmptyState');
@@ -429,64 +434,62 @@ function renderInventoryCards(items) {
 
     visibleItems.forEach(item => {
         const card = document.createElement('div');
-
-        // ➤ CRITICAL: Generate the exact same ID as the notification handler
         const rawString = `${item.name}-${item.branch || 'general'}`;
         const uniqueId = rawString.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         card.id = `card-${uniqueId}`;
 
-        card.className = "group relative flex flex-col justify-between rounded-3xl bg-white border border-slate-100 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden h-full";
+        // Compact container with smaller border radius
+        card.className = "group relative flex flex-col justify-between rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer overflow-hidden h-full";
         card.onclick = () => openItemDetails(item);
 
         const isLow = (item.quantity || 0) <= (item.reorder_level || 0);
         const safeName = item.name.replace(/'/g, "\\'");
         const safeBranch = (item.branch || '').replace(/'/g, "\\'");
-        const supplier = item.supplier_batch || 'Unknown Supplier';
 
         card.innerHTML = `
-          <div class="h-1.5 w-full bg-gradient-to-r ${isLow ? 'from-rose-500 to-orange-400' : 'from-emerald-400 to-teal-500'}"></div>
-          <div class="p-5 flex-1 flex flex-col">
-              <div class="flex justify-between items-start mb-4">
-                  <div>
-                      <h3 class="font-extrabold text-slate-800 text-lg leading-tight mb-1 group-hover:text-emerald-600 transition-colors">${item.name}</h3>
-                      <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">${item.branch || 'General'}</span>
+          <div class="h-1 w-full ${isLow ? 'bg-rose-500' : 'bg-brand-600'}"></div>
+          
+          <div class="p-4 flex-1 flex flex-col">
+              <div class="flex justify-between items-start mb-3">
+                  <div class="max-w-[70%]">
+                      <h3 class="font-bold text-slate-800 text-sm leading-tight group-hover:text-brand-600 transition-colors truncate">${item.name}</h3>
+                      <span class="inline-flex px-1.5 py-0.5 rounded bg-brand-50 border border-brand-100 text-[9px] font-bold text-brand-600 uppercase tracking-wider mt-1">${item.branch || 'General'}</span>
                   </div>
-                  <div class="flex flex-col items-end">
-                      <span class="text-3xl font-black ${isLow ? 'text-rose-500' : 'text-slate-700'} tracking-tight">${item.quantity || 0}</span>
-                      <span class="text-[9px] text-slate-400 font-bold uppercase">In Stock</span>
-                  </div>
-              </div>
-              <div class="grid grid-cols-2 gap-2 mb-5">
-                  <div class="bg-white/50 rounded-xl p-2 border border-white/60">
-                      <span class="block text-[9px] uppercase text-slate-400 font-bold mb-0.5">Category</span>
-                      <span class="text-xs font-semibold text-slate-600 truncate block">${item.category || '-'}</span>
-                  </div>
-                   <div class="bg-white/50 rounded-xl p-2 border border-white/60">
-                      <span class="block text-[9px] uppercase text-slate-400 font-bold mb-0.5">Reorder Lvl</span>
-                      <div class="flex items-center gap-1">
-                          <span class="text-xs font-semibold text-slate-600">${item.reorder_level || 0}</span>
-                          ${isLow ? '<span class="text-[9px] text-rose-500 font-bold animate-pulse">!</span>' : ''}
-                      </div>
+                  <div class="text-right">
+                      <span class="text-xl font-black ${isLow ? 'text-rose-600' : 'text-slate-700'} tracking-tight">${item.quantity || 0}</span>
+                      <span class="block text-[8px] text-slate-400 font-bold uppercase">Stock</span>
                   </div>
               </div>
-              <div class="mt-auto grid grid-cols-[1fr_1.5fr_auto] gap-2 pt-4 border-t border-slate-100">
+
+              <div class="grid grid-cols-2 gap-2 mb-4">
+                  <div class="bg-slate-50/50 rounded-lg p-1.5 border border-slate-100">
+                      <span class="block text-[8px] uppercase text-slate-400 font-bold">Category</span>
+                      <span class="text-[10px] font-semibold text-slate-600 truncate block">${item.category || '-'}</span>
+                  </div>
+                   <div class="bg-slate-50/50 rounded-lg p-1.5 border border-slate-100">
+                      <span class="block text-[8px] uppercase text-slate-400 font-bold">Reorder</span>
+                      <span class="text-[10px] font-semibold text-slate-600">${item.reorder_level || 0}</span>
+                  </div>
+              </div>
+
+              <div class="mt-auto grid grid-cols-[1fr_1fr_auto] gap-2 pt-3 border-t border-slate-50">
                 <button onclick="event.stopPropagation(); openEditStockModal('${safeName}', '${safeBranch}', ${item.quantity || 0})" 
-                    class="w-full py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 transition shadow-sm whitespace-nowrap">
+                    class="py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-brand-50 hover:text-brand-900 transition">
                     Edit
                 </button>
                 <button onclick="event.stopPropagation(); openRestockModal('${safeName}', '${safeBranch}', ${item.quantity || 0})" 
-                    class="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-bold hover:bg-emerald-600 hover:text-white transition shadow-sm whitespace-nowrap">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13L4.707 15.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                    Reorder
+                    class="py-1.5 rounded-lg bg-brand-600 text-white text-[10px] font-bold shadow-sm hover:bg-brand-700 transition">
+                    Order
                 </button>
                 <button onclick="event.stopPropagation(); confirmDelete('${safeName}')" 
-                    class="w-9 h-9 flex items-center justify-center rounded-xl bg-rose-50 text-rose-400 border border-rose-100 hover:bg-rose-500 hover:text-white transition shadow-sm" title="Delete Item">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    class="w-8 h-8 flex items-center justify-center rounded-lg bg-rose-50 text-rose-400 hover:bg-rose-500 hover:text-white transition">
+                    <i class="fas fa-trash-alt text-[9px]"></i>
                 </button>
             </div>
           </div>`;
 
         container.appendChild(card);
+
 
         // ➤ CRITICAL: Highlight Logic
         // Checks if the global pendingHighlight ID matches this card's unique ID
@@ -1104,80 +1107,45 @@ async function fetchSuppliers() {
     } catch (e) { console.error("Fetch Error:", e); }
 }
 
+// //////////////////////////////////////// //
+//      THEMED SUPPLIER CARD RENDERER        //
+// //////////////////////////////////////// //
 function renderSupplierCards(suppliers) {
     const grid = document.getElementById('suppliersGrid');
     if (!grid) return;
     grid.innerHTML = '';
 
-    if (!suppliers || suppliers.length === 0) {
-        grid.innerHTML = `<div class="col-span-full text-center py-10 text-slate-400">No suppliers found.</div>`;
-        return;
-    }
-
     suppliers.forEach(s => {
         const initial = s.name.charAt(0).toUpperCase();
         const safeName = s.name.replace(/'/g, "\\'");
-        const safeContact = (s.contact || '').replace(/'/g, "\\'");
-        const safePhone = (s.phone || '').replace(/'/g, "\\'");
-        const safeWebsite = (s.website || '').replace(/'/g, "\\'");
-        // Store notes but replace newlines for safe passing
-        const safeNotes = (s.notes || '').replace(/'/g, "\\'").replace(/\n/g, "\\n");
-
-        // Logic: Is this an online shop? (Has website but no phone, or just has website)
-        let contactDisplay = '';
-        if (s.phone) {
-            contactDisplay = `<a href="tel:${s.phone}" class="text-sm font-semibold text-emerald-600 hover:underline truncate block">📞 ${s.phone}</a>`;
-        } else if (s.website) {
-            contactDisplay = `<a href="${s.website}" target="_blank" class="text-sm font-semibold text-emerald-600 hover:underline truncate block">🌐 Visit Shop</a>`;
-        } else {
-            contactDisplay = `<span class="text-sm font-semibold text-slate-400">-</span>`;
-        }
-
-        // Show notes if they exist
-        const notesSection = s.notes ?
-            `<div class="mt-3 text-xs text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100 italic">"${s.notes}"</div>`
-            : '';
 
         grid.innerHTML += `
-<div class="bg-white border border-slate-100 rounded-2xl p-5 shadow-md hover:shadow-lg transition-all duration-200 group relative flex flex-col h-full">
-            <div class="flex items-start justify-between mb-4">
+        <div class="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all group flex flex-col h-full">
+            <div class="flex items-start justify-between mb-3">
                 <div class="flex items-center gap-3">
-                    <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white text-lg font-bold shadow-sm flex-shrink-0">
+                    <div class="h-10 w-10 rounded-xl bg-brand-600 flex items-center justify-center text-white text-base font-bold shadow-sm shrink-0">
                         ${initial}
                     </div>
                     <div class="overflow-hidden">
-                        <h3 class="font-bold text-slate-800 text-base truncate" title="${s.name}">${s.name}</h3>
-                        <p class="text-xs text-slate-500 truncate">${s.contact || 'No contact person'}</p>
+                        <h3 class="font-bold text-brand-900 text-sm truncate" title="${s.name}">${s.name}</h3>
+                        <p class="text-[10px] text-slate-500 truncate">${s.contact || 'No contact'}</p>
                     </div>
                 </div>
                 <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onclick="openEditSupplier('${safeName}', '${safeContact}', '${safePhone}', ${s.lead_time_days}, '${safeWebsite}', '${safeNotes}')" 
-                        class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition" title="Edit">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                    </button>
-                    <button onclick="deleteSupplier('${safeName}')" 
-                        class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="Delete">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    </button>
+                    <button onclick="openEditSupplier('${safeName}')" class="p-1.5 text-slate-400 hover:text-brand-600 rounded-lg transition"><i class="fas fa-edit text-xs"></i></button>
+                    <button onclick="deleteSupplier('${safeName}')" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition"><i class="fas fa-trash-alt text-xs"></i></button>
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3 mb-2">
-                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <span class="block text-[10px] text-slate-400 uppercase font-bold mb-0.5">Lead Time</span>
-                    <span class="text-sm font-semibold text-slate-700">${s.lead_time_days || '-'} Days</span>
-                </div>
-                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <span class="block text-[10px] text-slate-400 uppercase font-bold mb-0.5">${s.website ? 'Link / Contact' : 'Contact'}</span>
-                    ${contactDisplay}
-                </div>
+            <div class="bg-brand-50/50 p-2 rounded-xl border border-brand-50 mb-3">
+                <span class="block text-[8px] text-slate-400 uppercase font-bold mb-0.5">Lead Time</span>
+                <span class="text-xs font-semibold text-brand-700">${s.lead_time_days || '-'} Days</span>
             </div>
-
-            ${notesSection}
             
-            <div class="mt-auto pt-4">
-                <button onclick="openRestockFromSupplier('${safeName}')" class="w-full py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 hover:text-slate-800 transition">
-                    Create Purchase Order
+            <div class="mt-auto pt-2">
+                <button onclick="openRestockFromSupplier('${safeName}')" 
+                    class="w-full py-2 rounded-xl bg-white border border-slate-200 text-brand-600 text-[10px] font-bold hover:bg-brand-600 hover:text-white transition">
+                    Create Order
                 </button>
             </div>
         </div>`;
@@ -1351,14 +1319,14 @@ function handleSupplierOutsideClick(e) {
 
 // Quick Helper to start an order
 function openRestockFromSupplier(supplierName) {
-    showPage('dashboard');
     openRestockModal('', '', 0); // Open generic
     // Pre-select supplier logic would go here if we enhance restock modal further
     setTimeout(() => {
         const select = document.getElementById('restock_supplier');
+        const label = document.getElementById('restockSupplierLabel');
         if (select) select.value = supplierName;
-        document.getElementById('restockSupplierLabel').textContent = supplierName;
-    }, 500);
+        if (label) label.textContent = supplierName;
+    }, 100); // Reduced delay for faster UI response
 }
 
 async function fetchOrders() {
@@ -1368,26 +1336,46 @@ async function fetchOrders() {
     } catch (e) { }
 }
 
+
+// //////////////////////////////////////// //
+//      THEMED & ALIGNED ORDERS RENDERER     //
+// //////////////////////////////////////// //
 function renderOrdersTable(orders) {
     const tbody = document.getElementById('ordersTableBody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    if (!orders || orders.length === 0) { tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-400">No orders.</td></tr>`; return; }
+
+    if (!orders || orders.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-10 text-slate-400 text-xs">No active orders found.</td></tr>`;
+        return;
+    }
 
     orders.forEach(o => {
-        let badge = o.status === 'pending'
-            ? `<span class="px-2 py-1 rounded-md bg-amber-50 text-amber-600 text-xs font-bold border border-amber-100">Pending</span>`
-            : `<span class="px-2 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold border border-emerald-100">Received</span>`;
+        const badge = o.status === 'pending'
+            ? `<span class="px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 text-[10px] font-bold border border-amber-100">Pending</span>`
+            : `<span class="px-2 py-0.5 rounded-md bg-brand-50 text-brand-600 text-[10px] font-bold border border-brand-100">Received</span>`;
+
+        // DATE LOGIC: Ensure column 5 is populated
+        const dateStr = o.created_at ? new Date(o.created_at).toLocaleDateString() : '-';
 
         tbody.innerHTML += `
-        <tr class="hover:bg-slate-50/50 transition">
-            <td class="px-6 py-4 font-mono text-xs text-slate-500">#PO-${(o._id || o.id || '???').slice(-4)}</td>
-            <td class="px-6 py-4"><div class="font-bold text-slate-700">${o.item}</div><div class="text-xs text-slate-400">Qty: ${o.quantity}</div></td>
-            <td class="px-6 py-4 text-xs text-slate-600">${o.branch}</td>
-            <td class="px-6 py-4">${badge}</td>
-            <td class="px-6 py-4 text-xs text-slate-500">${new Date(o.created_at).toLocaleDateString()}</td>
+        <tr class="hover:bg-brand-50/20 transition group">
+            <td class="px-6 py-4 font-mono text-[10px] text-slate-400">#PO-${(o._id || o.id || '???').slice(-4)}</td>
+            <td class="px-6 py-4">
+                <div class="font-bold text-slate-700 text-sm leading-tight">${o.item}</div>
+                <div class="text-[10px] text-slate-400">Qty: ${o.quantity}</div>
+            </td>
+            <td class="px-6 py-4 text-xs text-slate-500 font-medium">${o.branch}</td>
+            <td class="px-6 py-4 text-center">${badge}</td>
+            <td class="px-6 py-4 text-xs text-slate-500 font-medium">${dateStr}</td>
             <td class="px-6 py-4 text-center">
-                ${o.status === 'pending' ? `<button onclick="showToast('Order received logic needed')" class="text-xs bg-slate-900 text-white px-3 py-1.5 rounded-lg">Receive</button>` : `<span class="text-xs text-emerald-600 font-medium">✓ Done</span>`}
+                ${o.status === 'pending'
+                ? `<button onclick="showToast('Feature coming soon')" 
+                         class="bg-brand-600 hover:bg-brand-900 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold transition shadow-sm">Receive</button>`
+                : `<span class="text-brand-600 font-bold text-[10px] flex items-center justify-center gap-1">
+                         <i class="fas fa-check-circle"></i> Complete
+                       </span>`
+            }
             </td>
         </tr>`;
     });
@@ -1906,25 +1894,14 @@ async function fetchAnalyticsCharts(branchName = 'All') { // Accept parameter
     }
 }
 
-// 4. Draw Charts (Renderer)
+// //////////////////////////////////////// //
+//      ✨ UPDATED: GRADIENT ANALYTICS RENDERER //
+// //////////////////////////////////////// //
 function drawAnalytics(payload) {
     const section = document.getElementById('analytics-section');
     if (!section || section.classList.contains('hidden')) {
         lastAnalyticsPayload = payload;
         return;
-    }
-
-    // Update KPI Cards from Payload if available
-    if (payload.overview) {
-        const o = payload.overview;
-        const updateText = (id, val) => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = val;
-        };
-        updateText("an-new-items", o.new_items);
-        updateText("an-batches-7d", o.batches_7d);
-        updateText("an-total-items", o.total_items);
-        updateText("an-branches", o.branches);
     }
 
     const lineCanvas = document.getElementById('analytics-main-chart');
@@ -1947,18 +1924,40 @@ function drawAnalytics(payload) {
                 {
                     label: 'Stock In',
                     data: monthly.stock_in || [],
-                    borderColor: '#5E4074',
-                    pointBorderColor: '#5E4074',
+                    borderColor: '#5E4074', // Plume Wine
+                    borderWidth: 3,
                     pointBackgroundColor: '#fff',
-                    backgroundColor: 'rgba(94, 64, 116, 0.1)',
-                    pointRadius: 4
+                    pointBorderColor: '#5E4074',
+                    pointHoverRadius: 6,
+                    fill: true,
+                    // ➤ ADDED: Dynamic Gradient Logic
+                    backgroundColor: function (context) {
+                        const chart = context.chart;
+                        const { ctx, chartArea } = chart;
+                        if (!chartArea) return null;
+                        const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                        gradient.addColorStop(0, 'rgba(94, 64, 116, 0.05)');  // Light Wine
+                        gradient.addColorStop(0.5, 'rgba(94, 64, 116, 0.4)'); // Mid Wine
+                        gradient.addColorStop(1, 'rgba(94, 64, 116, 0.8)');   // Deep Plume Wine
+                        return gradient;
+                    },
+                    tension: 0.4
                 },
                 {
                     label: 'Stock Out',
                     data: monthly.stock_out || [],
-                    borderColor: '#f43f5e',
-                    backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                    tension: 0.3,
+                    borderColor: '#f43f5e', // Rose Red
+                    borderWidth: 3,
+                    backgroundColor: function (context) {
+                        const chart = context.chart;
+                        const { ctx, chartArea } = chart;
+                        if (!chartArea) return null;
+                        const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                        gradient.addColorStop(0, 'rgba(244, 63, 94, 0.05)');
+                        gradient.addColorStop(1, 'rgba(244, 63, 94, 0.6)');
+                        return gradient;
+                    },
+                    tension: 0.4,
                     fill: true,
                     pointBackgroundColor: '#fff',
                     pointBorderColor: '#f43f5e',
@@ -1973,20 +1972,28 @@ function drawAnalytics(payload) {
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    backgroundColor: 'rgba(37, 23, 48, 0.9)', // Deep Wine Tooltip
                     padding: 12,
-                    cornerRadius: 8,
-                    displayColors: true
+                    cornerRadius: 12,
+                    titleFont: { size: 13, weight: 'bold' },
+                    bodyFont: { size: 12 }
                 }
             },
             scales: {
-                y: { beginAtZero: true, grid: { color: '#f1f5f9', borderDash: [5, 5] }, ticks: { font: { size: 10 } } },
-                x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(0,0,0,0.03)', borderDash: [5, 5] },
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
+                }
             }
         }
     });
 
-    // B. Small Chart (Bar)
+    // B. Small Chart (Weekly Bar)
     const barCtx = barCanvas.getContext('2d');
     if (stockInOutChart) { stockInOutChart.destroy(); stockInOutChart = null; }
 
@@ -1998,15 +2005,15 @@ function drawAnalytics(payload) {
                 {
                     label: 'In',
                     data: weekly.stock_in || [],
-                    backgroundColor: '#10b981',
-                    borderRadius: 4,
+                    backgroundColor: '#5E4074', // Changed from emerald to Plume Wine
+                    borderRadius: 6,
                     barPercentage: 0.6
                 },
                 {
                     label: 'Out',
                     data: weekly.stock_out || [],
                     backgroundColor: '#f43f5e',
-                    borderRadius: 4,
+                    borderRadius: 6,
                     barPercentage: 0.6
                 }
             ]
@@ -2014,8 +2021,11 @@ function drawAnalytics(payload) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(15, 23, 42, 0.9)', padding: 10, cornerRadius: 8 } },
-            scales: { y: { display: false, beginAtZero: true }, x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#94a3b8' } } }
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { display: false, beginAtZero: true },
+                x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#94a3b8' } }
+            }
         }
     });
 }
@@ -2078,8 +2088,8 @@ function startQrScanner() {
         onScanSuccess,
         onScanFailure
     ).then(() => {
-        // UI Updates: Enable Stop & Switch, Disable Start
         updateScannerUI(true);
+        // Toast already uses brand-900 (Wine)
         showToast(`Camera started (${currentFacingMode === 'environment' ? 'Back' : 'Front'})`);
     }).catch(err => {
         console.error("Camera error", err);
@@ -2240,13 +2250,48 @@ async function qrQuickAction(action) {
 // ==========================================
 // 13. MOBILE MENU LOGIC
 // ==========================================
-
 function toggleMobileMenu() {
     const menu = document.getElementById('mobileMenu');
-    if (menu) {
-        menu.classList.toggle('hidden');
+    if (!menu) return;
+
+    if (menu.classList.contains('hidden')) {
+        menu.classList.remove('hidden');
+        document.body.style.overflow = 'hidden'; // Stop scrolling background
+    } else {
+        menu.classList.add('hidden');
+        document.body.style.overflow = ''; // Restore scrolling
     }
 }
+
+// //////////////////////////////////////// //
+//      👮 ROLE PERMISSIONS HANDLER           //
+// //////////////////////////////////////// //
+function applyRolePermissions() {
+    if (!currentUser) return;
+
+    // Elements to hide for Staff
+    const adminMenuBtn = document.getElementById('adminMenuBtn');
+    const mobileAdminMenu = document.getElementById('mobileAdminMenu'); // ➤ Mobile target
+
+    // Elements only for Owner
+    const ownerSettingsBtn = document.getElementById('ownerSettingsBtn');
+    const mobileSettingsBtn = document.getElementById('mobileSettingsBtn'); // ➤ Mobile target
+
+    if (currentUser.role === 'staff') {
+        if (adminMenuBtn) adminMenuBtn.classList.add('hidden');
+        if (mobileAdminMenu) mobileAdminMenu.classList.add('hidden');
+    } else {
+        if (adminMenuBtn) adminMenuBtn.classList.remove('hidden');
+        if (mobileAdminMenu) mobileAdminMenu.classList.remove('hidden');
+    }
+
+    // Special check for owner-level settings
+    if (currentUser.role === 'owner') {
+        if (ownerSettingsBtn) ownerSettingsBtn.classList.remove('hidden');
+        if (mobileSettingsBtn) mobileSettingsBtn.classList.remove('hidden');
+    }
+}
+
 
 // ==========================================
 // SHARED DELETE MODAL LOGIC
@@ -2432,34 +2477,32 @@ function renderAuditTable(logs) {
         return;
     }
 
+    // //////////////////////////////////////// //
+    //      🛡️ COMPLIANCE TABLE MOBILE FIX        //
+    // //////////////////////////////////////// //
     logs.forEach(log => {
         const isOut = log.direction === 'out';
-        const badgeClass = isOut
-            ? "bg-rose-50 text-rose-600 border border-rose-100"
-            : "bg-emerald-50 text-emerald-600 border border-emerald-100";
-
-        const dateStr = new Date(log.date).toLocaleDateString() + ' ' + new Date(log.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        // NEW: Use the reason category or fallback
-        const reason = log.reason_category || (isOut ? "Usage" : "Restock");
+        const dateObj = new Date(log.date);
+        const dateStr = dateObj.toLocaleDateString();
+        const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
         tbody.innerHTML += `
-        <tr class="hover:bg-slate-50/80 transition">
-            <td class="px-6 py-3 font-mono text-xs text-slate-500">${dateStr}</td>
-            <td class="px-6 py-3">
-                <div class="flex flex-col">
-                    <span class="inline-flex w-fit items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ${badgeClass}">
-                        ${log.direction.toUpperCase()}
-                    </span>
-                    <span class="text-[10px] text-slate-400 mt-1 font-medium">${reason}</span>
-                </div>
-            </td>
-            <td class="px-6 py-3 font-bold text-slate-700">${log.name}</td>
-            <td class="px-6 py-3 text-xs text-slate-500">${log.branch || 'Main'}</td>
-            <td class="px-6 py-3 text-right font-mono font-bold ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
-                ${isOut ? '-' : '+'}${log.quantity_used}
-            </td>
-        </tr>`;
+    <tr class="hover:bg-slate-50/80 transition">
+        <td class="px-3 md:px-6 py-3">
+            <div class="font-mono text-[10px] md:text-xs text-slate-500">${dateStr}</div>
+            <div class="font-mono text-[9px] text-slate-400 md:hidden">${timeStr}</div>
+        </td>
+        <td class="px-3 md:px-6 py-3">
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] md:text-[10px] font-bold uppercase tracking-wide border ${isOut ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}">
+                ${log.direction}
+            </span>
+        </td>
+        <td class="px-3 md:px-6 py-3 font-bold text-slate-700 text-xs md:text-sm">${log.name}</td>
+        <td class="hidden sm:table-cell px-6 py-3 text-xs text-slate-500">${log.branch || 'Main'}</td>
+        <td class="px-3 md:px-6 py-3 text-right font-mono font-bold text-xs md:text-sm ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
+            ${isOut ? '-' : '+'}${log.quantity_used}
+        </td>
+    </tr>`;
     });
 }
 
@@ -2751,9 +2794,16 @@ function openUserModal() {
 
 let currentUser = null;
 
+
 async function checkCurrentUser() {
     try {
-        const res = await fetch(`${API_BASE}/api/me`);
+        // ➤ CRITICAL FIX: Added credentials: 'include'
+        // This allows the browser to send the session cookie to the backend,
+        // preventing the system from thinking you are logged out.
+        const res = await fetch(`${API_BASE}/api/me`, {
+            credentials: 'include'
+        });
+
         if (!res.ok) {
             // If session expired or invalid, logout
             doLogout();
@@ -3010,23 +3060,22 @@ function downloadSystemBackup() {
     window.open(`${API_BASE}/api/admin/backup`, '_blank');
 }
 
-// --- SOCKET LISTENERS FOR GOVERNANCE ---
-// Add this inside your existing socket initialization or at the bottom of the file
+// //////////////////////////////////////// //
+//      📢 SYSTEM GOVERNANCE SOCKET          //
+// //////////////////////////////////////// //
+const governanceSocket = io(API_BASE === "" ? window.location.origin : API_BASE);
 
-const governanceSocket = io("https://premierluxinventory.onrender.com");
-
-
-// 1. Listen for Broadcasts
+// Handlers for real-time system broadcasts from the Owner
 governanceSocket.on('system_broadcast', (data) => {
-    // Show a special sticky toast or alert
     const msg = data.message;
-    // Simple custom alert style
     const div = document.createElement('div');
-    div.className = "fixed top-10 left-1/2 -translate-x-1/2 bg-indigo-900 text-white px-6 py-4 rounded-xl shadow-2xl z-[300] flex items-center gap-4 animate-bounce-slight";
+
+    // Updated: Using Brand Wine (brand-900) and Cloud (brand-100)
+    div.className = "fixed top-10 left-1/2 -translate-x-1/2 bg-brand-900 text-white px-6 py-4 rounded-xl shadow-2xl z-[300] flex items-center gap-4 animate-bounce-slight border border-white/10";
     div.innerHTML = `
         <span class="text-2xl">📢</span>
         <div>
-            <p class="text-xs font-bold uppercase text-indigo-300">System Announcement</p>
+            <p class="text-xs font-bold uppercase text-brand-100 opacity-60">System Announcement</p>
             <p class="font-bold text-sm">${msg}</p>
         </div>
         <button onclick="this.parentElement.remove()" class="bg-white/20 hover:bg-white/30 rounded-full w-6 h-6 flex items-center justify-center text-[10px]">✕</button>
@@ -3037,97 +3086,81 @@ governanceSocket.on('system_broadcast', (data) => {
     setTimeout(() => div.remove(), 10000);
 });
 
-// 2. Listen for Kill Switch
-governanceSocket.on('force_logout_event', (data) => {
-    // If I am NOT the owner, I must logout
-    // (We check the role stored in JS variable or localStorage)
-    const myRole = localStorage.getItem('user_role'); // Ensure you save this on login
 
-    if (myRole !== 'owner') {
-        alert("⚡ SESSION TERMINATED\nThe system administrator has forced a global logout.");
-        doLogout();
-    }
-});
-
-// ==========================================
-//  🧠 GEMINI AI FRONTEND LOGIC
-// ==========================================
-
+// //////////////////////////////////////// //
+//      🧠 LUX AI DASHBOARD RENDERER         //
+// //////////////////////////////////////// //
 async function initAIModule() {
     const aiTextEl = document.getElementById('dash-ai-text');
     const aiStatsEl = document.getElementById('dash-ai-stats');
 
     if (!aiTextEl) return;
 
-    // 1. Loading UI
-    aiTextEl.innerHTML = `
-        <div class="flex flex-col gap-2 animate-pulse">
-            <div class="flex items-center gap-2 text-indigo-300">
-                <i class="fas fa-brain fa-spin"></i> 
-                <span>Consulting AI...</span>
-            </div>
-            <span class="text-xs text-slate-400">Analyzing inventory risks...</span>
-        </div>`;
-
-    aiStatsEl.innerHTML = `<span>⏳</span> Connecting...`;
-    aiStatsEl.className = "px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-slate-300 flex items-center gap-2";
+    // 1. Reset & Loading State
+    aiTextEl.innerHTML = `<span class="animate-pulse opacity-50">Consulting AI model...</span>`;
+    aiStatsEl.innerHTML = `<span>⏳</span> Syncing`;
+    aiStatsEl.className = "w-fit px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-[9px] font-bold text-brand-100 flex items-center gap-2";
 
     try {
         const res = await fetch(`${API_BASE}/api/ai/analyze`);
         const data = await res.json();
 
-        // ➤ SAFETY CHECK: Ensure data exists
-        const summary = data.insight_text || data.error || "No insights available.";
-        const badge = data.status_badge || "Unknown";
-
-        // 2. Render Text
+        // 2. Render Summary with smooth fade
         aiTextEl.style.opacity = 0;
         setTimeout(() => {
-            aiTextEl.innerHTML = summary;
+            aiTextEl.innerHTML = data.insight_text || "No insights available.";
             aiTextEl.style.opacity = 1;
             aiTextEl.classList.add('transition-opacity', 'duration-500');
-        }, 300);
+        }, 200);
 
-        // 3. Update Badge Color
-        let badgeClass = "bg-indigo-500/20 text-indigo-200 border-indigo-500/30";
+        // 3. Update Badge (Linen, Wine, Rose, and Sage Green theme)
+        let badgeClass = "bg-brand-500/20 text-brand-100 border-brand-500/30";
         let icon = "🤖";
+        const status = data.status_badge || "Ready";
 
-        if (badge.includes('Critical') || badge.includes('Error')) {
+        if (status.includes('Critical') || status.includes('Warning')) {
             badgeClass = "bg-rose-500/20 text-rose-300 border-rose-500/30";
             icon = "🚨";
-        } else if (badge.includes('Healthy')) {
-            badgeClass = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+        } else if (status.includes('Healthy')) {
+            // Sage Green (#7D8C7D) for healthy status
+            badgeClass = "bg-[#7D8C7D]/20 text-white border-[#7D8C7D]/30";
             icon = "✅";
         }
 
-        aiStatsEl.className = `px-3 py-1.5 rounded-lg text-xs font-bold border shadow-sm flex items-center gap-2 ${badgeClass}`;
-        aiStatsEl.innerHTML = `<span>${icon}</span> ${badge}`;
+        aiStatsEl.className = `w-fit px-2 py-1 rounded-lg text-[9px] font-bold border shadow-sm flex items-center gap-2 ${badgeClass}`;
+        aiStatsEl.innerHTML = `<span>${icon}</span> ${status}`;
 
-        // 4. Render Suggestions button if available
+        // 4. Render Suggestions button if recommendations exist
         if (data.recommended_order && data.recommended_order.length > 0) {
             renderAiSuggestions(data.recommended_order);
         }
 
     } catch (error) {
-        console.error("AI Error:", error);
-        aiTextEl.innerHTML = "Connection to AI failed.";
+        console.error("AI Fetch Error:", error);
+        aiTextEl.innerHTML = "Connection to LUX AI failed. Check your API key.";
         aiStatsEl.innerHTML = "Offline";
     }
 }
 
+
+// //////////////////////////////////////// //
+//      ✨ AI RECOMMENDATION RENDERER        //
+// //////////////////////////////////////// //
 function renderAiSuggestions(suggestions) {
     const container = document.getElementById('dash-ai-text').parentNode;
 
-    // Remove old button if exists
+    // Remove old button if exists to prevent duplicates
     const oldBtn = document.getElementById('ai-restock-btn');
     if (oldBtn) oldBtn.remove();
 
     const btn = document.createElement('button');
     btn.id = "ai-restock-btn";
-    btn.className = "mt-4 w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl text-xs font-bold text-white shadow-lg shadow-indigo-500/30 transition flex items-center justify-center gap-2 transform active:scale-95";
-    btn.innerHTML = `<span>⚡</span> Review ${suggestions.length} Recommendations`;
 
-    // ➤ CHANGED: Now opens the beautiful overlay
+    // Updated: Using Sage Green (#7D8C7D) for the button as requested (Touch of Green)
+    btn.className = "mt-4 w-full py-3 bg-[#7D8C7D] hover:bg-[#6B786B] rounded-xl text-xs font-bold text-white shadow-lg shadow-black/10 transition flex items-center justify-center gap-2 transform active:scale-95";
+    btn.innerHTML = `<span>⚡</span> Review ${suggestions.length} AI Recommendations`;
+
+    // Opens the specialized AI analysis overlay
     btn.onclick = () => openAiOverlay(suggestions);
 
     container.appendChild(btn);
@@ -3277,30 +3310,21 @@ function typeWriterEffect(element, html) {
 // ✨ LUX CHATBOT LOGIC
 // ==========================================
 
-// ➤ FIX: This variable MUST be defined here
-let currentLuxImageBase64 = null;
-
 function toggleLuxChat() {
     const windowEl = document.getElementById('luxChatWindow');
     const btn = document.getElementById('luxChatBtn');
+    if (!windowEl || !btn) return;
 
     if (windowEl.classList.contains('hidden')) {
-        // Open
         windowEl.classList.remove('hidden');
         setTimeout(() => {
             windowEl.classList.remove('scale-95', 'opacity-0');
             windowEl.classList.add('scale-100', 'opacity-100');
         }, 10);
-        btn.classList.add('rotate-90', 'opacity-0');
-        setTimeout(() => btn.classList.add('hidden'), 200);
+        btn.classList.add('hidden');
     } else {
-        // Close
-        windowEl.classList.remove('scale-100', 'opacity-100');
-        windowEl.classList.add('scale-95', 'opacity-0');
-        setTimeout(() => windowEl.classList.add('hidden'), 300);
-
+        windowEl.classList.add('hidden');
         btn.classList.remove('hidden');
-        setTimeout(() => btn.classList.remove('rotate-90', 'opacity-0'), 10);
     }
 }
 
@@ -3328,57 +3352,51 @@ function clearLuxImage() {
 }
 
 async function sendLuxMessage(e) {
-    e.preventDefault(); // Prevents page reload on Enter
+    if (e) e.preventDefault();
+
     const input = document.getElementById('luxChatInput');
     const msg = input.value.trim();
 
-    // Allow sending if there is text OR an image
+    // ➤ FIX: We use 'currentLuxImageBase64' which is now defined at the top
     if (!msg && !currentLuxImageBase64) return;
 
-    // 1. Add User Message to Chat
     let displayMsg = msg;
     if (currentLuxImageBase64) {
         displayMsg += `<br><img src="${currentLuxImageBase64}" class="mt-2 rounded-lg w-32 h-32 object-cover border border-white/20">`;
     }
-    addChatBubble(displayMsg, 'user');
 
-    // Clear Input UI immediately
+    addChatBubble(displayMsg, 'user');
     input.value = '';
+
     const imageToSend = currentLuxImageBase64;
     clearLuxImage();
 
-    // 2. Add "Thinking" Bubble
     const thinkingId = addChatBubble('<i class="fas fa-circle-notch fa-spin"></i> Analyzing...', 'lux', true);
 
     try {
         const res = await fetch(`${API_BASE}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: msg,
-                image: imageToSend
-            })
+            credentials: 'include', // ➤ Added to prevent login loop
+            body: JSON.stringify({ message: msg, image: imageToSend })
         });
 
-        const data = await res.json();
+        // ➤ FIX: Explicitly define 'data' here to stop "ReferenceError: data is not defined"
+        const responseData = await res.json();
 
-        // Remove thinking bubble
         const thinkingEl = document.getElementById(thinkingId);
         if (thinkingEl) thinkingEl.remove();
 
-        // 3. Add LUX Response
-        if (data.type === 'error') {
-            addChatBubble("⚠️ " + data.text, 'lux');
+        if (responseData.type === 'error') {
+            addChatBubble("⚠️ " + responseData.text, 'lux');
         } else {
-            let formattedText = data.text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-            formattedText = formattedText.replace(/\n/g, '<br>');
+            let formattedText = responseData.text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
             addChatBubble(formattedText, 'lux');
         }
-
     } catch (err) {
         console.error(err);
         document.getElementById(thinkingId)?.remove();
-        addChatBubble("Sorry, I lost connection to the server.", 'lux');
+        addChatBubble("Sorry, LUX is currently offline.", 'lux');
     }
 }
 
@@ -3456,6 +3474,4 @@ async function fetchPriceInsights() {
         if (summaryEl) summaryEl.innerHTML = "LUX is currently calculating trends...";
     }
 }
-
-
 
