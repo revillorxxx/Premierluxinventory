@@ -1,8 +1,3 @@
-/**
- * PREMIERLUX INVENTORY SYSTEM - MAIN LOGIC
- * Consolidated & Cleaned Version
- */
-let currentLuxImageBase64 = null;
 let currentUserRole = 'admin';
 
 // --- API CONFIGURATION ---
@@ -26,6 +21,59 @@ let analyticsSocket = null;
 let lastAnalyticsPayload = null;
 let currentAnalyticsBranch = 'All'
 let pendingHighlightItem = null;
+
+// //////////////////////////////////////// //
+//      🔐 AUTH & ROLE MANAGEMENT            //
+// //////////////////////////////////////// //
+let currentUser = null;
+
+async function checkCurrentUser() {
+    try {
+        // Send session cookie to backend for verification
+        const res = await fetch(`${API_BASE}/api/me`, {
+            credentials: 'include'
+        });
+
+        if (!res.ok) {
+            doLogout();
+            return;
+        }
+        currentUser = await res.json();
+
+        // Apply UI restrictions based on role
+        applyRolePermissions();
+        console.log(`Authenticated as: ${currentUser.name} (${currentUser.role})`);
+    } catch (err) {
+        console.error("Auth check failed:", err);
+    }
+}
+
+function applyRolePermissions() {
+    if (!currentUser) return;
+
+    const adminMenu = document.getElementById('adminMenuBtn');
+    const mobileAdminMenu = document.getElementById('mobileAdminMenu');
+    const ownerSettingsBtn = document.getElementById('ownerSettingsBtn');
+    const mobileSettingsBtn = document.getElementById('mobileSettingsBtn');
+
+    // Hide admin features for staff
+    if (currentUser.role === 'staff') {
+        if (adminMenu) adminMenu.classList.add('hidden');
+        if (mobileAdminMenu) mobileAdminMenu.classList.add('hidden');
+    } else {
+        if (adminMenu) adminMenu.classList.remove('hidden');
+        if (mobileAdminMenu) mobileAdminMenu.classList.remove('hidden');
+    }
+
+    // Show owner-only features
+    if (currentUser.role === 'owner') {
+        if (ownerSettingsBtn) ownerSettingsBtn.classList.remove('hidden');
+        if (mobileSettingsBtn) mobileSettingsBtn.classList.remove('hidden');
+    } else {
+        if (ownerSettingsBtn) ownerSettingsBtn.classList.add('hidden');
+        if (mobileSettingsBtn) mobileSettingsBtn.classList.add('hidden');
+    }
+}
 // ==========================================
 // 1. GLOBAL HELPERS & STATE
 // ==========================================
@@ -543,13 +591,13 @@ function updateBranchSelect(branches) {
     container.innerHTML = '';
     container.innerHTML += `
         <button onclick="selectBranch('All', 'All branches')" 
-            class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition">
+            class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-bold text-slate-700 hover:bg-[#7D8C7D]/20 hover:text-brand-600 transition">
             All branches
         </button>`;
     branches.forEach(b => {
         container.innerHTML += `
             <button onclick="selectBranch('${b.name}', '${b.name}')" 
-                class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition">
+                class="w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-[#7D8C7D]/20 hover:text-brand-600 transition">
                 ${b.name}
             </button>`;
     });
@@ -631,26 +679,41 @@ function handleNotificationClick(itemName, branchName) {
     // 5. Refresh inventory (This will trigger the highlight in renderInventoryCards)
     fetchInventory();
 }
-function handleLocalAcknowledge(type, id) {
-    // 1. Visual Feedback
-    showToast("Alert Acknowledged");
 
-    // 2. SAVE TO LOCAL STORAGE (Persistence)
-    // We store the ID in a list of "dismissed" items so it doesn't come back on refresh
-    const dismissed = JSON.parse(localStorage.getItem('premierlux_dismissed') || '[]');
-    if (!dismissed.includes(id)) {
-        dismissed.push(id);
-        localStorage.setItem('premierlux_dismissed', JSON.stringify(dismissed));
-    }
 
-    // 3. Remove from local state immediately (Optimistic UI)
-    if (type === 'stock') {
-        window.bellState.lowStockItems = window.bellState.lowStockItems.filter(i => i.name !== id);
-    } else if (type === 'expiry') {
-        window.bellState.expiringItems = window.bellState.expiringItems.filter(i => {
-            const iId = i.id || i._id || i.batch_number || 'unknown';
-            return iId !== id;
+// //////////////////////////////////////// //
+//      📜 FULL ACTIVITY LOGS RENDERER       //
+// //////////////////////////////////////// //
+async function fetchActivityLogs() {
+    const tbody = document.getElementById('activityLogsTableBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10">Syncing logs...</td></tr>';
+
+    try {
+        const res = await fetch(`${API_BASE}/api/admin/activity-logs`, { credentials: 'include' });
+        const logs = await res.json();
+
+        tbody.innerHTML = '';
+        if (logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10 text-slate-400">No recent activity.</td></tr>';
+            return;
+        }
+
+        logs.forEach(log => {
+            const date = new Date(log.timestamp).toLocaleString();
+            tbody.innerHTML += `
+            <tr class="hover:bg-brand-50/30 transition border-b border-slate-50 last:border-0">
+                <td class="px-6 py-4 font-mono text-[10px] text-slate-400">${date}</td>
+                <td class="px-6 py-4 font-bold text-brand-900 text-xs uppercase tracking-wider">${log.user}</td>
+                <td class="px-6 py-4">
+                    <span class="px-2 py-1 rounded bg-brand-50 text-brand-600 text-[10px] font-bold border border-brand-100">${log.action}</span>
+                </td>
+                <td class="px-6 py-4 text-xs text-slate-600">${log.details}</td>
+            </tr>`;
         });
+    } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10 text-rose-500">Error loading logs.</td></tr>';
     }
 
     // 4. Re-render
@@ -668,21 +731,47 @@ function fetchAlertsForBell() {
         .catch(err => console.error('Error fetching alerts', err));
 }
 
-// 4. Render the Dropdown Content (Desktop & Mobile)
+// //////////////////////////////////////// //
+//      📜 UNIFIED ACKNOWLEDGE & LOGGING     //
+// //////////////////////////////////////// //
+async function acknowledgeAlert(alertId) {
+    try {
+        const res = await fetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, {
+            method: 'POST',
+            credentials: 'include' // Sends session cookie for user identification
+        });
+
+        if (res.ok) {
+            showToast("Alert Acknowledged & Logged");
+
+            // Remove from local notification state immediately
+            window.bellState.apiAlerts = window.bellState.apiAlerts.filter(a => a.id !== alertId);
+            window.bellState.lowStockItems = window.bellState.lowStockItems.filter(i => i.name !== alertId);
+            window.bellState.expiringItems = window.bellState.expiringItems.filter(i => {
+                const iId = i.id || i._id || i.batch_number || 'unknown';
+                return iId !== alertId;
+            });
+
+            renderSharedBell(); // Refresh the bell UI
+        }
+    } catch (err) {
+        console.error("Acknowledge Error:", err);
+    }
+}
+
+// //////////////////////////////////////// //
+//      🔔 THEMED NOTIFICATION BELL RENDERER //
+// //////////////////////////////////////// //
 function renderSharedBell() {
     const alertBadge = document.getElementById('alertsBadge');
-
-    // Target BOTH lists
     const desktopList = document.getElementById('alertsDropdownList');
     const mobileList = document.getElementById('mobileAlertsList');
 
-    // Counts
     const lowCount = window.bellState.lowStockItems.length;
     const expCount = window.bellState.expiringItems.length;
     const apiCount = window.bellState.apiAlerts.length;
     const totalAlerts = lowCount + expCount + apiCount;
 
-    // Update Red Badge (Desktop Icon)
     if (alertBadge) {
         alertBadge.textContent = totalAlerts > 9 ? '9+' : totalAlerts;
         if (totalAlerts > 0) {
@@ -693,29 +782,22 @@ function renderSharedBell() {
         }
     }
 
-    // Helper to clear and set content for both lists
-    const setContent = (html) => {
-        if (desktopList) desktopList.innerHTML = html;
-        if (mobileList) mobileList.innerHTML = html;
-    };
-
     const appendContent = (html) => {
         if (desktopList) desktopList.innerHTML += html;
         if (mobileList) mobileList.innerHTML += html;
     };
 
-    // 1. Handle Empty State
     if (totalAlerts === 0) {
-        setContent(`
-            <div class="flex flex-col items-center justify-center py-4 text-slate-500 opacity-60">
+        const emptyHtml = `
+            <div class="flex flex-col items-center justify-center py-6 text-slate-500 opacity-60">
                 <span class="text-xl">🎉</span>
                 <span class="text-[10px] mt-1">All caught up!</span>
-            </div>
-        `);
+            </div>`;
+        if (desktopList) desktopList.innerHTML = emptyHtml;
+        if (mobileList) mobileList.innerHTML = emptyHtml;
         return;
     }
 
-    // Clear lists before adding new items
     if (desktopList) desktopList.innerHTML = '';
     if (mobileList) mobileList.innerHTML = '';
 
@@ -725,7 +807,7 @@ function renderSharedBell() {
         const safeBranch = (branch || 'General').toString().replace(/'/g, "\\'");
 
         return `
-        <div class="group mb-2 bg-slate-800/50 hover:bg-slate-800 border border-white/5 rounded-xl overflow-hidden transition-all duration-200">
+        <div class="group mb-2 bg-slate-800/40 hover:bg-slate-800 border border-white/5 rounded-xl overflow-hidden transition-all duration-200">
             <div class="flex items-center justify-between px-3 py-2 bg-white/5 border-b border-white/5">
                 <div class="flex items-center gap-2 overflow-hidden">
                     <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${colorClass}">
@@ -736,13 +818,13 @@ function renderSharedBell() {
                     </span>
                 </div>
                 <button onclick="${btnCallback}; event.stopPropagation();" 
-                    class="text-slate-500 hover:text-emerald-400 transition-colors p-1 rounded-full hover:bg-white/10" 
+                    class="text-slate-500 hover:text-brand-600 transition-colors p-1.5 rounded-full hover:bg-white/10" 
                     title="Acknowledge">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"></path></svg>
+                    <i class="fas fa-thumbs-up text-xs"></i>
                 </button>
             </div>
             <div onclick="handleNotificationClick('${safeItem}', '${safeBranch}'); toggleMobileMenu();" 
-                 class="px-3 py-2 cursor-pointer hover:bg-white/5 transition">
+                 class="px-3 py-2 cursor-pointer hover:bg-white/5 transition text-left">
                 <div class="flex justify-between items-center">
                     <span class="text-sm font-semibold text-slate-200">${item || 'Unknown Item'}</span>
                     <span class="text-[10px] text-slate-400 font-mono">${detail}</span>
@@ -756,13 +838,13 @@ function renderSharedBell() {
         const daysLeft = item.daysLeft;
         const isExpired = daysLeft < 0;
         const badgeText = isExpired ? "Expired" : "Expiring";
-        const detailText = isExpired ? `Expired ${Math.abs(daysLeft)} days ago` : `${daysLeft} days left`;
+        const detailText = isExpired ? `Expired ${Math.abs(daysLeft)}d ago` : `${daysLeft}d left`;
         const badgeColor = isExpired ? "bg-red-500/20 text-red-400" : "bg-orange-500/20 text-orange-400";
         const itemId = item.id || item._id || item.batch_number || 'unknown';
 
         appendContent(createNotificationRow(
             badgeText, item.branch, item.item_name, detailText, badgeColor,
-            `handleLocalAcknowledge('expiry', '${itemId}')`
+            `acknowledgeAlert('${itemId}')`
         ));
     });
 
@@ -771,7 +853,7 @@ function renderSharedBell() {
         appendContent(createNotificationRow(
             "Low Stock", item.branch, item.name, `${item.quantity} units left`,
             "bg-rose-500/20 text-rose-400",
-            `handleLocalAcknowledge('stock', '${item.name}')`
+            `acknowledgeAlert('${item.name}')`
         ));
     });
 
@@ -779,22 +861,23 @@ function renderSharedBell() {
     window.bellState.apiAlerts.forEach(alert => {
         appendContent(createNotificationRow(
             "System", "Admin", alert.title, "Action required",
-            "bg-emerald-500/20 text-emerald-400",
+            "bg-[#7D8C7D]/20 text-[#D1D9D1]", // Sage Green accent for System
             `acknowledgeAlert('${alert.id}')`
         ));
     });
 }
 
+// //////////////////////////////////////// //
+//      📦 INVENTORY SYNC HELPERS            //
+// //////////////////////////////////////// //
 window.updateLowStock = function (data) {
     if (!data) return;
-
-    // Get dismissed IDs
     const dismissed = JSON.parse(localStorage.getItem('premierlux_dismissed') || '[]');
 
     window.bellState.lowStockItems = data.filter(i => {
         const isLow = (i.quantity || 0) <= (i.reorder_level || 0);
         const isDismissed = dismissed.includes(i.name);
-        return isLow && !isDismissed; // Only show if Low AND Not Dismissed
+        return isLow && !isDismissed;
     });
 
     renderSharedBell();
@@ -808,12 +891,10 @@ window.updateApiAlerts = function (alerts) {
 
 window.updateExpiryAndBell = function (batchData) {
     if (!batchData || !Array.isArray(batchData)) return;
-
     const today = new Date();
     const dismissed = JSON.parse(localStorage.getItem('premierlux_dismissed') || '[]');
 
     window.bellState.expiringItems = [];
-
     batchData.forEach(item => {
         const dateString = item.exp_date || item.expiration_date;
         if (dateString) {
@@ -821,11 +902,8 @@ window.updateExpiryAndBell = function (batchData) {
             if (!isNaN(expDate)) {
                 const diffTime = expDate - today;
                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                // Identify the item uniquely
                 const itemId = item.id || item._id || item.batch_number || 'unknown';
 
-                // Check if expiring (<= 30 days) AND Not Dismissed
                 if (diffDays <= 30 && !dismissed.includes(itemId)) {
                     window.bellState.expiringItems.push({ ...item, daysLeft: diffDays });
                 }
@@ -833,20 +911,36 @@ window.updateExpiryAndBell = function (batchData) {
         }
     });
 
-    // Update KPI Card
     const dashExpiringEl = document.getElementById('dash-expiring');
     if (dashExpiringEl) {
         dashExpiringEl.textContent = window.bellState.expiringItems.length;
     }
-
     renderSharedBell();
 };
 
+// //////////////////////////////////////// //
+//      📦 BATCH & EXPIRY DATA FETCHING      //
+// //////////////////////////////////////// //
 function fetchBatchesForAlerts() {
     fetch(`${API_BASE}/api/batches`)
         .then(r => r.json())
-        .then(data => { if (window.updateExpiryAndBell) window.updateExpiryAndBell(data); });
+        .then(data => {
+            if (window.updateExpiryAndBell) {
+                window.updateExpiryAndBell(data);
+            }
+        })
+        .catch(err => console.error("Error fetching batches for alerts:", err));
 }
+
+fetch(`${API_BASE}/api/batches`)
+    .then(r => r.json())
+    .then(data => {
+        if (window.updateExpiryAndBell) {
+            window.updateExpiryAndBell(data);
+        }
+    })
+    .catch(err => console.error("Error fetching batches for alerts:", err));
+
 
 
 // ==========================================
@@ -875,7 +969,7 @@ function updateBatchBranchSelect(branches) {
     branches.forEach(b => {
         container.innerHTML += `
             <button type="button" onclick="selectBatchBranch('${b.name}')" 
-                class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition">
+                class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-[#7D8C7D]/20 hover:text-brand-600 transition">
                 ${b.name}
             </button>`;
     });
@@ -1039,7 +1133,7 @@ function updateRestockSupplierSelect(suppliers) {
     else suppliers.forEach(s => {
         container.innerHTML += `
             <button type="button" onclick="selectRestockSupplier('${s.name}')" 
-                class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition flex justify-between items-center">
+                class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-[#7D8C7D]/20 hover:text-brand-600 transition flex justify-between items-center">
                 <span>${s.name}</span><span class="text-[10px] text-slate-400">${s.lead_time_days || '?'} days</span>
             </button>`;
     });
@@ -2409,7 +2503,7 @@ function fetchComplianceData() {
                 const isOut = log.direction === 'out';
                 const badgeClass = isOut
                     ? "bg-rose-50 text-rose-600 border-rose-100"
-                    : "bg-emerald-50 text-emerald-600 border-emerald-100";
+                    : "bg-[#7D8C7D]/20 text-brand-600 border-emerald-100";
 
                 const actionLabel = isOut ? "Stock Used / Adjusted" : "Stock Added / Restocked";
                 const dateStr = new Date(log.date).toLocaleString();
@@ -2424,7 +2518,7 @@ function fetchComplianceData() {
                     </td>
                     <td class="px-6 py-4 font-medium text-slate-700">${log.name}</td>
                     <td class="px-6 py-4 text-xs text-slate-500">${log.branch || 'Main'}</td>
-                    <td class="px-6 py-4 text-right font-bold ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
+                    <td class="px-6 py-4 text-right font-bold ${isOut ? 'text-rose-600' : 'text-brand-600'}">
                         ${isOut ? '-' : '+'}${log.quantity_used}
                     </td>
                 </tr>`;
@@ -2493,13 +2587,13 @@ function renderAuditTable(logs) {
             <div class="font-mono text-[9px] text-slate-400 md:hidden">${timeStr}</div>
         </td>
         <td class="px-3 md:px-6 py-3">
-            <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] md:text-[10px] font-bold uppercase tracking-wide border ${isOut ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}">
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[8px] md:text-[10px] font-bold uppercase tracking-wide border ${isOut ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-[#7D8C7D]/20 text-brand-600 border-emerald-100'}">
                 ${log.direction}
             </span>
         </td>
         <td class="px-3 md:px-6 py-3 font-bold text-slate-700 text-xs md:text-sm">${log.name}</td>
         <td class="hidden sm:table-cell px-6 py-3 text-xs text-slate-500">${log.branch || 'Main'}</td>
-        <td class="px-3 md:px-6 py-3 text-right font-mono font-bold text-xs md:text-sm ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
+        <td class="px-3 md:px-6 py-3 text-right font-mono font-bold text-xs md:text-sm ${isOut ? 'text-rose-600' : 'text-brand-600'}">
             ${isOut ? '-' : '+'}${log.quantity_used}
         </td>
     </tr>`;
@@ -2612,7 +2706,7 @@ function fetchUsers() {
             users.forEach(u => {
                 // 1. Role Badges
                 let roleColor = 'bg-slate-100 text-slate-500 border border-slate-200'; // Staff default
-                if (u.role === 'admin') roleColor = 'bg-emerald-50 text-emerald-600 border border-emerald-100';
+                if (u.role === 'admin') roleColor = 'bg-[#7D8C7D]/20 text-brand-600 border border-emerald-100';
                 if (u.role === 'owner') roleColor = 'bg-purple-50 text-purple-600 border border-purple-100 ring-2 ring-purple-500/10';
 
                 // 2. Branch Badges
@@ -2779,7 +2873,7 @@ function openUserModal() {
                     branches.forEach(b => {
                         container.innerHTML += `
                             <button type="button" onclick="selectUserBranch('${b.name}')" 
-                                class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-emerald-50 hover:text-emerald-600 transition">
+                                class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-[#7D8C7D]/20 hover:text-brand-600 transition">
                                 ${b.name}
                             </button>`;
                     });
@@ -2788,68 +2882,6 @@ function openUserModal() {
     }
 }
 
-// ==========================================
-// 0. AUTH & ROLE MANAGEMENT
-// ==========================================
-
-let currentUser = null;
-
-
-async function checkCurrentUser() {
-    try {
-        // ➤ CRITICAL FIX: Added credentials: 'include'
-        // This allows the browser to send the session cookie to the backend,
-        // preventing the system from thinking you are logged out.
-        const res = await fetch(`${API_BASE}/api/me`, {
-            credentials: 'include'
-        });
-
-        if (!res.ok) {
-            // If session expired or invalid, logout
-            doLogout();
-            return;
-        }
-        currentUser = await res.json();
-
-        // 1. Update UI with User Info
-        updateUserInterface();
-
-        // 2. Apply Role Restrictions
-        applyRolePermissions();
-
-    } catch (err) {
-        console.error("Auth check failed", err);
-    }
-}
-
-function updateUserInterface() {
-    // Example: You could add a welcome message in the navbar if you have an element for it
-    // document.getElementById('userNameDisplay').textContent = currentUser.name;
-    console.log(`Logged in as: ${currentUser.name} (${currentUser.role})`);
-}
-
-function applyRolePermissions() {
-    if (!currentUser) return;
-
-    const adminMenu = document.getElementById('adminMenuBtn');
-    const ownerSettingsBtn = document.getElementById('ownerSettingsBtn'); // <--- NEW
-
-    // 1. Staff: Hide entire Admin Menu
-    if (currentUser.role === 'staff') {
-        if (adminMenu) adminMenu.classList.add('hidden');
-    } else {
-        if (adminMenu) adminMenu.classList.remove('hidden');
-    }
-
-    // 2. Owner: Show Settings Button (Hide for Admin)
-    if (ownerSettingsBtn) {
-        if (currentUser.role === 'owner') {
-            ownerSettingsBtn.classList.remove('hidden');
-        } else {
-            ownerSettingsBtn.classList.add('hidden');
-        }
-    }
-}
 
 // ==========================================
 // 16. ADMIN ROLES PAGE LOGIC
@@ -3451,14 +3483,14 @@ async function fetchPriceInsights() {
                 const trendIcon = pred.trend === 'Rising' ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
 
                 list.innerHTML += `
-                <div class="p-4 rounded-2xl bg-white border border-slate-100 hover:border-emerald-500/30 transition group shadow-sm">
+                <div class="p-4 rounded-2xl bg-white border border-slate-100 hover:border-brand-500/30 transition group shadow-sm">
                     <div class="flex justify-between items-start mb-1">
                         <span class="font-bold text-slate-800 text-sm">${pred.item}</span>
                         <span class="text-[9px] font-black uppercase ${trendColor} flex items-center gap-1">
                             <i class="fas ${trendIcon}"></i> ${pred.trend}
                         </span>
                     </div>
-                    <div class="text-[10px] text-emerald-600 font-bold mb-3 flex items-center gap-1">
+                    <div class="text-[10px] text-brand-600 font-bold mb-3 flex items-center gap-1">
                         <i class="fas fa-truck-field"></i> ${pred.supplier}
                     </div>
                     <div class="flex justify-between items-center bg-slate-50 p-2 rounded-lg">
