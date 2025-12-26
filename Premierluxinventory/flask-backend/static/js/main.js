@@ -681,14 +681,22 @@ function handleNotificationClick(itemName, branchName) {
 }
 
 
-// //////////////////////////////////////// //
-//      📜 FULL ACTIVITY LOGS RENDERER       //
-// //////////////////////////////////////// //
+// Section: Activity Logs Renderer
 async function fetchActivityLogs() {
     const tbody = document.getElementById('activityLogsTableBody');
+    const tableHeader = document.querySelector('#admin-logs-section thead'); // target the header to color it
+
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10">Syncing logs...</td></tr>';
+    // Apply Purple Theme to Header if found
+    if (tableHeader) {
+        tableHeader.className = "bg-purple-50 border-b border-purple-100";
+        tableHeader.querySelectorAll('th').forEach(th => {
+            th.className = "px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider";
+        });
+    }
+
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10"><i class="fas fa-circle-notch fa-spin text-purple-500"></i> Syncing...</td></tr>';
 
     try {
         const res = await fetch(`${API_BASE}/api/admin/activity-logs`, { credentials: 'include' });
@@ -702,51 +710,75 @@ async function fetchActivityLogs() {
 
         logs.forEach(log => {
             const date = new Date(log.timestamp).toLocaleString();
+
+            // Determine Badge Color (Purple for everything based on your image)
+            const badgeClass = "bg-purple-100 text-purple-800 border border-purple-200";
+
             tbody.innerHTML += `
-            <tr class="hover:bg-brand-50/30 transition border-b border-slate-50 last:border-0">
-                <td class="px-6 py-4 font-mono text-[10px] text-slate-400">${date}</td>
-                <td class="px-6 py-4 font-bold text-brand-900 text-xs uppercase tracking-wider">${log.user}</td>
-                <td class="px-6 py-4">
-                    <span class="px-2 py-1 rounded bg-brand-50 text-brand-600 text-[10px] font-bold border border-brand-100">${log.action}</span>
+            <tr class="hover:bg-purple-50/30 transition border-b border-gray-100 last:border-0">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400 font-medium font-mono">
+                    ${date}
                 </td>
-                <td class="px-6 py-4 text-xs text-slate-600">${log.details}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-800">
+                    ${log.user}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-medium ${badgeClass}">
+                        ${log.action}
+                    </span>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600">
+                    ${log.details}
+                </td>
             </tr>`;
         });
     } catch (err) {
+        console.error(err);
         tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10 text-rose-500">Error loading logs.</td></tr>';
     }
-
-    // 4. Re-render
-    renderSharedBell();
 }
 
-// 3. Fetch System Alerts (from Backend)
 function fetchAlertsForBell() {
-    fetch(ALERTS_API_URL)
+    fetch(ALERTS_API_URL, { credentials: 'include' })
         .then(res => res.json())
         .then(alerts => {
             if (window.updateApiAlerts) window.updateApiAlerts(alerts);
-            renderSharedBell(); // Render after fetching
+            renderSharedBell();
         })
-        .catch(err => console.error('Error fetching alerts', err));
+        .catch(err => console.error('Error fetching alerts:', err));
 }
 
-// //////////////////////////////////////// //
-//      📜 UNIFIED ACKNOWLEDGE & LOGGING     //
-// //////////////////////////////////////// //
-async function acknowledgeAlert(alertId) {
+async function acknowledgeAlert(alertId, itemName, branchName) {
     try {
+        // 1. Backend Acknowledge (For Logs & Cloud Persistence)
         const res = await fetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, {
             method: 'POST',
-            credentials: 'include' // Sends session cookie for user identification
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                log_detail: `User dismissed alert for ${itemName} - ${branchName}`
+            }),
+            credentials: 'include'
         });
 
         if (res.ok) {
             showToast("Alert Acknowledged & Logged");
 
-            // Remove from local notification state immediately
+            // 2. Local Storage Persistence (CRITICAL FIX)
+            // We must add this ID to the local 'dismissed' list so the frontend 
+            // knows to hide it even after a page refresh.
+            const dismissed = JSON.parse(localStorage.getItem('premierlux_dismissed') || '[]');
+            if (!dismissed.includes(alertId)) {
+                dismissed.push(alertId);
+                localStorage.setItem('premierlux_dismissed', JSON.stringify(dismissed));
+            }
+
+            // 3. Update UI State (Remove immediately)
             window.bellState.apiAlerts = window.bellState.apiAlerts.filter(a => a.id !== alertId);
+
+            // Filter Low Stock
             window.bellState.lowStockItems = window.bellState.lowStockItems.filter(i => i.name !== alertId);
+
+            // Filter Expiry Items (Check all possible ID fields)
             window.bellState.expiringItems = window.bellState.expiringItems.filter(i => {
                 const iId = i.id || i._id || i.batch_number || 'unknown';
                 return iId !== alertId;
@@ -760,18 +792,23 @@ async function acknowledgeAlert(alertId) {
 }
 
 // //////////////////////////////////////// //
-//      🔔 THEMED NOTIFICATION BELL RENDERER //
+//      5. NOTIFICATION BELL MODULE          //
 // //////////////////////////////////////// //
+
 function renderSharedBell() {
     const alertBadge = document.getElementById('alertsBadge');
     const desktopList = document.getElementById('alertsDropdownList');
     const mobileList = document.getElementById('mobileAlertsList');
+
+    // Safety check
+    if (!desktopList && !mobileList) return;
 
     const lowCount = window.bellState.lowStockItems.length;
     const expCount = window.bellState.expiringItems.length;
     const apiCount = window.bellState.apiAlerts.length;
     const totalAlerts = lowCount + expCount + apiCount;
 
+    // 1. Update Badge Visibility
     if (alertBadge) {
         alertBadge.textContent = totalAlerts > 9 ? '9+' : totalAlerts;
         if (totalAlerts > 0) {
@@ -782,94 +819,115 @@ function renderSharedBell() {
         }
     }
 
+    // 2. Prepare HTML Content
     const appendContent = (html) => {
         if (desktopList) desktopList.innerHTML += html;
         if (mobileList) mobileList.innerHTML += html;
     };
 
+    // Reset Lists
+    if (desktopList) desktopList.innerHTML = '';
+    if (mobileList) mobileList.innerHTML = '';
+
+    // 3. Handle Empty State
     if (totalAlerts === 0) {
         const emptyHtml = `
-            <div class="flex flex-col items-center justify-center py-6 text-slate-500 opacity-60">
-                <span class="text-xl">🎉</span>
-                <span class="text-[10px] mt-1">All caught up!</span>
+            <div class="flex flex-col items-center justify-center py-8 text-slate-400 opacity-60">
+                <span class="text-2xl mb-2">🎉</span>
+                <span class="text-xs font-bold uppercase tracking-wide">All caught up!</span>
             </div>`;
         if (desktopList) desktopList.innerHTML = emptyHtml;
         if (mobileList) mobileList.innerHTML = emptyHtml;
         return;
     }
 
-    if (desktopList) desktopList.innerHTML = '';
-    if (mobileList) mobileList.innerHTML = '';
-
-    // --- ROW CREATOR HELPER ---
-    const createNotificationRow = (type, branch, item, detail, colorClass, btnCallback) => {
-        const safeItem = (item || 'Unknown Item').toString().replace(/'/g, "\\'");
-        const safeBranch = (branch || 'General').toString().replace(/'/g, "\\'");
-
-        return `
-        <div class="group mb-2 bg-slate-800/40 hover:bg-slate-800 border border-white/5 rounded-xl overflow-hidden transition-all duration-200">
-            <div class="flex items-center justify-between px-3 py-2 bg-white/5 border-b border-white/5">
-                <div class="flex items-center gap-2 overflow-hidden">
-                    <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md ${colorClass}">
-                        ${type}
-                    </span>
-                    <span class="text-[10px] text-slate-400 font-medium truncate max-w-[100px]" title="${branch}">
-                        ${branch || 'General'}
-                    </span>
-                </div>
-                <button onclick="${btnCallback}; event.stopPropagation();" 
-                    class="text-slate-500 hover:text-brand-600 transition-colors p-1.5 rounded-full hover:bg-white/10" 
-                    title="Acknowledge">
-                    <i class="fas fa-thumbs-up text-xs"></i>
-                </button>
-            </div>
-            <div onclick="handleNotificationClick('${safeItem}', '${safeBranch}'); toggleMobileMenu();" 
-                 class="px-3 py-2 cursor-pointer hover:bg-white/5 transition text-left">
-                <div class="flex justify-between items-center">
-                    <span class="text-sm font-semibold text-slate-200">${item || 'Unknown Item'}</span>
-                    <span class="text-[10px] text-slate-400 font-mono">${detail}</span>
-                </div>
-            </div>
-        </div>`;
-    };
+    // 4. Render Items
 
     // A. Expiring Items
     window.bellState.expiringItems.forEach(item => {
         const daysLeft = item.daysLeft;
-        const isExpired = daysLeft < 0;
-        const badgeText = isExpired ? "Expired" : "Expiring";
-        const detailText = isExpired ? `Expired ${Math.abs(daysLeft)}d ago` : `${daysLeft}d left`;
-        const badgeColor = isExpired ? "bg-red-500/20 text-red-400" : "bg-orange-500/20 text-orange-400";
+        const badgeColor = daysLeft < 0 ? "bg-red-100 text-red-600 border border-red-200" : "bg-orange-100 text-orange-600 border border-orange-200";
+        const badgeText = daysLeft < 0 ? "Expired" : "Expiring";
+        const detailText = daysLeft < 0 ? `Expired ${Math.abs(daysLeft)}d ago` : `${daysLeft} days left`;
+
         const itemId = item.id || item._id || item.batch_number || 'unknown';
+
+        // Prepare safe strings
+        const safeName = (item.item_name || 'Item').replace(/'/g, "\\'");
+        const safeBranch = (item.branch || 'General').replace(/'/g, "\\'");
 
         appendContent(createNotificationRow(
             badgeText, item.branch, item.item_name, detailText, badgeColor,
-            `acknowledgeAlert('${itemId}')`
+            // ➤ FIX: Pass safeName and safeBranch arguments here!
+            `acknowledgeAlert('${itemId}', '${safeName}', '${safeBranch}')`
         ));
     });
 
     // B. Low Stock Items
     window.bellState.lowStockItems.forEach(item => {
+        // Prepare safe strings
+        const safeName = (item.name || 'Item').replace(/'/g, "\\'");
+        const safeBranch = (item.branch || 'General').replace(/'/g, "\\'");
+
         appendContent(createNotificationRow(
-            "Low Stock", item.branch, item.name, `${item.quantity} units left`,
-            "bg-rose-500/20 text-rose-400",
-            `acknowledgeAlert('${item.name}')`
+            "Low Stock", item.branch, item.name, `${item.quantity} units remaining`,
+            "bg-rose-100 text-rose-600 border border-rose-200",
+            // ➤ FIX: Pass safeName and safeBranch here too!
+            `acknowledgeAlert('${item.name}', '${safeName}', '${safeBranch}')`
         ));
     });
 
     // C. System Alerts
     window.bellState.apiAlerts.forEach(alert => {
+        const safeTitle = (alert.title || 'System Alert').replace(/'/g, "\\'");
+
         appendContent(createNotificationRow(
-            "System", "Admin", alert.title, "Action required",
-            "bg-[#7D8C7D]/20 text-[#D1D9D1]", // Sage Green accent for System
-            `acknowledgeAlert('${alert.id}')`
+            "System", "Admin", alert.title, "Action Required",
+            "bg-[#7D8C7D]/20 text-[#5E4074] border border-[#7D8C7D]/30",
+            // ➤ FIX: Pass Title and 'System' as branch
+            `acknowledgeAlert('${alert.id}', '${safeTitle}', 'System')`
         ));
     });
 }
 
+// ✨ UI HELPER: Clean Light Theme Card (Matches your Linen/Wine design)
+function createNotificationRow(type, branch, item, detail, colorClass, btnCallback) {
+    const safeItem = (item || 'Unknown Item').toString().replace(/'/g, "\\'");
+    const safeBranch = (branch || 'General').toString().replace(/'/g, "\\'");
+
+    return `
+    <div class="group mb-2 bg-white border border-slate-100 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200">
+        <div class="flex items-center justify-between px-3 py-2 bg-slate-50/50 border-b border-slate-100">
+            <div class="flex items-center gap-2 overflow-hidden">
+                <span class="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${colorClass}">
+                    ${type}
+                </span>
+                <span class="text-[10px] text-slate-400 font-bold truncate max-w-[100px]" title="${branch}">
+                    ${branch || 'General'}
+                </span>
+            </div>
+            <button onclick="${btnCallback}; event.stopPropagation();" 
+                class="text-slate-300 hover:text-[#5E4074] hover:bg-slate-100 p-1.5 rounded-full transition-colors" 
+                title="Mark as Read">
+                <i class="fas fa-check text-xs"></i>
+            </button>
+        </div>
+        <div onclick="handleNotificationClick('${safeItem}', '${safeBranch}'); toggleMobileMenu();" 
+             class="px-3 py-2.5 cursor-pointer hover:bg-[#F5F0F9] transition-colors group-hover:border-l-4 group-hover:border-l-[#5E4074]">
+            <div class="flex flex-col">
+                <span class="text-xs font-bold text-slate-700 leading-tight mb-0.5">${item || 'Unknown Item'}</span>
+                <span class="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                    <i class="fas fa-info-circle text-[8px] opacity-70"></i> ${detail}
+                </span>
+            </div>
+        </div>
+    </div>`;
+}
+
 // //////////////////////////////////////// //
-//      📦 INVENTORY SYNC HELPERS            //
+//      📦 SYNC HELPERS (Data Handlers)      //
 // //////////////////////////////////////// //
+
 window.updateLowStock = function (data) {
     if (!data) return;
     const dismissed = JSON.parse(localStorage.getItem('premierlux_dismissed') || '[]');
@@ -885,6 +943,7 @@ window.updateLowStock = function (data) {
 
 window.updateApiAlerts = function (alerts) {
     if (!alerts) return;
+    // Filter out internal alert types that are handled by frontend logic
     window.bellState.apiAlerts = alerts.filter(a => a.type !== 'low_stock' && a.type !== 'expiry_risk');
     renderSharedBell();
 };
@@ -904,6 +963,7 @@ window.updateExpiryAndBell = function (batchData) {
                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                 const itemId = item.id || item._id || item.batch_number || 'unknown';
 
+                // Alert if expiring within 30 days
                 if (diffDays <= 30 && !dismissed.includes(itemId)) {
                     window.bellState.expiringItems.push({ ...item, daysLeft: diffDays });
                 }
@@ -911,6 +971,7 @@ window.updateExpiryAndBell = function (batchData) {
         }
     });
 
+    // Update Dashboard Counter if it exists
     const dashExpiringEl = document.getElementById('dash-expiring');
     if (dashExpiringEl) {
         dashExpiringEl.textContent = window.bellState.expiringItems.length;
