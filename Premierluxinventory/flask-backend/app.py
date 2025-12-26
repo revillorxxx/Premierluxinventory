@@ -154,7 +154,11 @@ def login_page():
 
 # ---------- USER MANAGEMENT & LOGGING ----------
 
-# Helper Function: Behavioral Logging
+# // //////////////////////////////////////// //
+# //      CENTRALIZED ACTIVITY LOGGING        //
+# // //////////////////////////////////////// //
+
+# Helper: Behavioral Logging
 def log_behavior(user_email, action, details):
     audit_collection.insert_one({
         "user": user_email,
@@ -162,6 +166,38 @@ def log_behavior(user_email, action, details):
         "details": details,
         "timestamp": datetime.now()
     })
+
+# KEEP THIS VERSION (around line 177)
+@app.post("/api/alerts/<alert_id>/acknowledge")
+def acknowledge_alert(alert_id):
+    if "user_email" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    user_email = session.get("user_email")
+    
+    # 1. Record Acknowledgment for Alert Filtering
+    db.alert_acknowledgements.insert_one({
+        "alert_id": alert_id,
+        "user_id": user_email,
+        "acknowledged_at": datetime.now()
+    })
+
+    # 2. Log to Activity Trail
+    log_behavior(user_email, "Acknowledged Alert", f"User dismissed alert: {alert_id}")
+    
+    return jsonify({"status": "ok"})
+
+# New Endpoint: Fetch All System Activities
+@app.route("/api/admin/activity-logs", methods=["GET"])
+def get_full_activity_logs():
+    if session.get("role") not in ["owner", "admin"]:
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Fetch last 100 activities from audit_collection
+    logs = list(audit_collection.find({}).sort("timestamp", -1).limit(100))
+    for log in logs:
+        log["_id"] = str(log["_id"])
+    return jsonify(logs)
 
 # ✅ FIXED: Allows both Owner and Admin
 @app.route("/api/users", methods=["GET"])
@@ -751,22 +787,6 @@ def create_order():
 
     return jsonify({"message": "Order created successfully", "order": data}), 201
 
-# ---------- ALERTS ----------
-
-@app.post("/api/alerts/<alert_id>/acknowledge")
-def acknowledge_alert(alert_id):
-    user_id = request.headers.get("X-User-Id", "demo-admin")
-    user_name = request.headers.get("X-User-Name", "Demo Admin")
-
-    doc = {
-        "alert_id": alert_id,
-        "user_id": user_id,
-        "user_name": user_name,
-        "acknowledged_at": datetime.utcnow().isoformat() + "Z",
-    }
-
-    db.alert_acknowledgements.insert_one(doc)
-    return jsonify({"status": "ok"})
 
 @app.get("/api/alerts")
 def get_alerts():
