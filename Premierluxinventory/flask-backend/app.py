@@ -167,13 +167,17 @@ def log_behavior(user_email, action, details):
         "timestamp": datetime.now()
     })
 
-# KEEP THIS VERSION (around line 177)
+# Updated Acknowledge Route to accept custom details
 @app.post("/api/alerts/<alert_id>/acknowledge")
 def acknowledge_alert(alert_id):
     if "user_email" not in session:
         return jsonify({"error": "Unauthorized"}), 401
     
     user_email = session.get("user_email")
+    
+    # ➤ CHANGE: Read the JSON body sent by the frontend
+    data = request.json or {}
+    custom_detail = data.get("log_detail")
     
     # 1. Record Acknowledgment for Alert Filtering
     db.alert_acknowledgements.insert_one({
@@ -183,7 +187,10 @@ def acknowledge_alert(alert_id):
     })
 
     # 2. Log to Activity Trail
-    log_behavior(user_email, "Acknowledged Alert", f"User dismissed alert: {alert_id}")
+    # ➤ CHANGE: Use the custom string if available, otherwise fallback to ID
+    log_msg = custom_detail if custom_detail else f"User dismissed alert: {alert_id}"
+    
+    log_behavior(user_email, "Acknowledged Alert", log_msg)
     
     return jsonify({"status": "ok"})
 
@@ -790,8 +797,8 @@ def create_order():
 
 @app.get("/api/alerts")
 def get_alerts():
-    # 1. Setup User ID for Acknowledgements
-    user_id = request.headers.get("X-User-Id", "demo-admin")
+    # 1. Setup User ID: Use the logged-in user from the session
+    user_id = session.get("user_email")  # <--- ✅ FIX: Matches acknowledge_alert logic
 
     alerts = []
     low_by_branch = {}
@@ -841,12 +848,11 @@ def get_alerts():
                 "branch": branch,
             })
 
-    # 4. NEW: STAFF REQUESTS (Pending Orders)
-    # This was likely the missing part or had a syntax error
+    # 4. PENDING ORDERS
     pending_orders = list(orders_collection.find({"status": "pending"}))
     for order in pending_orders:
         alerts.append({
-            "id": f"order-{str(order['_id'])}", # Converted ObjectId to string safely
+            "id": f"order-{str(order['_id'])}", 
             "type": "pending_request",
             "severity": "info",
             "title": f"📢 New Request: {order.get('item')}",
@@ -856,8 +862,8 @@ def get_alerts():
         })
 
     # 5. FILTER ACKNOWLEDGED ALERTS
-    # This prevents deleted alerts from reappearing
     try:
+        # Query using the session user_email
         acked_ids = {
             doc["alert_id"]
             for doc in db.alert_acknowledgements.find(
@@ -870,7 +876,6 @@ def get_alerts():
     visible_alerts = [a for a in alerts if a["id"] not in acked_ids]
     
     return jsonify(visible_alerts)
-
 
 # ---------- HELPER FUNCTION ----------
 
