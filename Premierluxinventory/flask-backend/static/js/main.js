@@ -50,28 +50,157 @@ async function checkCurrentUser() {
 
 function applyRolePermissions() {
     if (!currentUser) return;
-
+    const role = currentUser.role;
     const adminMenu = document.getElementById('adminMenuBtn');
     const mobileAdminMenu = document.getElementById('mobileAdminMenu');
     const ownerSettingsBtn = document.getElementById('ownerSettingsBtn');
     const mobileSettingsBtn = document.getElementById('mobileSettingsBtn');
+    const marketWidget = document.getElementById('lux-market-widget');
+    const reqBtn = document.getElementById('btnRequestNewItem');
 
-    // Hide admin features for staff
-    if (currentUser.role === 'staff') {
+    if (role === 'staff') {
         if (adminMenu) adminMenu.classList.add('hidden');
         if (mobileAdminMenu) mobileAdminMenu.classList.add('hidden');
+        if (marketWidget) marketWidget.classList.add('hidden');
+        if (reqBtn) reqBtn.classList.remove('hidden');
+
+        const desktopSupplierBtn = document.querySelector('button[onclick*="showPage(\'suppliers\')"]');
+        if (desktopSupplierBtn) desktopSupplierBtn.classList.add('hidden');
+
+        const mobileSupplierBtn = document.querySelector('#mobileProcurementSection button[onclick*="showPage(\'suppliers\')"]');
+        if (mobileSupplierBtn) mobileSupplierBtn.classList.add('hidden');
+
+        lockBranchUI(currentUser.branch);
+
     } else {
+        // --- ADMIN / OWNER ---
+        // Show everything
         if (adminMenu) adminMenu.classList.remove('hidden');
         if (mobileAdminMenu) mobileAdminMenu.classList.remove('hidden');
+        if (marketWidget) marketWidget.classList.remove('hidden');
+        if (reqBtn) reqBtn.classList.add('hidden');
+
+        // Unhide Suppliers
+        const desktopSupplierBtn = document.querySelector('button[onclick*="showPage(\'suppliers\')"]');
+        if (desktopSupplierBtn) desktopSupplierBtn.classList.remove('hidden');
+
+        const mobileSupplierBtn = document.querySelector('#mobileProcurementSection button[onclick*="showPage(\'suppliers\')"]');
+        if (mobileSupplierBtn) mobileSupplierBtn.classList.remove('hidden');
     }
 
-    // Show owner-only features
-    if (currentUser.role === 'owner') {
+    // Owner Specifics
+    if (role === 'owner') {
         if (ownerSettingsBtn) ownerSettingsBtn.classList.remove('hidden');
         if (mobileSettingsBtn) mobileSettingsBtn.classList.remove('hidden');
     } else {
         if (ownerSettingsBtn) ownerSettingsBtn.classList.add('hidden');
         if (mobileSettingsBtn) mobileSettingsBtn.classList.add('hidden');
+    }
+}
+// Helper for locking branch UI
+function lockBranchUI(branchName) {
+    const btn = document.getElementById('branchDropdownBtn');
+    const label = document.getElementById('branchLabel');
+    const filter = document.getElementById('branchFilter');
+
+    if (label) {
+        label.innerHTML = `<i class="fas fa-lock text-[10px] mr-1 opacity-50"></i> ${branchName}`;
+        if (btn) {
+            btn.onclick = null;
+            btn.classList.add('bg-slate-50', 'text-slate-400', 'cursor-not-allowed');
+        }
+        if (filter) filter.value = branchName;
+    }
+}
+
+
+// [main.js] - FIXED initDashboard (Solves "Active Branch KPI Syncing" issue)
+async function initDashboard() {
+    console.log("Initializing Dashboard...");
+
+    // FETCH INDEPENDENTLY (So one error doesn't kill the whole dashboard)
+
+    // 1. Inventory Data
+    fetch(API_URL)
+        .then(r => r.json())
+        .then(invRes => {
+            const totalValue = invRes.reduce((acc, item) => acc + ((item.price || 0) * (item.quantity || 0)), 0);
+            const lowStockItems = invRes.filter(item => (item.quantity || 0) <= (item.reorder_level || 0));
+
+            document.getElementById('dash-total-value').textContent = `₱${totalValue.toLocaleString('en-PH', { maximumFractionDigits: 0 })}`;
+            document.getElementById('dash-low-stock').textContent = lowStockItems.length;
+
+            // Render Charts
+            if (typeof renderGradientBranchChart === 'function') renderGradientBranchChart(invRes);
+            if (typeof renderCategoryDoughnut === 'function') renderCategoryDoughnut(invRes);
+
+            // Render Restock Table
+            renderRestockTable(lowStockItems);
+        })
+        .catch(e => console.error("Dash Inventory Error", e));
+
+    // 2. Branch Data (FIX FOR "SYNCING")
+    fetch(BRANCHES_API_URL)
+        .then(r => r.json())
+        .then(branchRes => {
+            const el = document.getElementById('dash-branches');
+            // Check if it's an array before checking length
+            if (el && Array.isArray(branchRes)) {
+                el.textContent = branchRes.length;
+            } else if (el) {
+                el.textContent = "1"; // Fallback
+            }
+        })
+        .catch(e => {
+            console.error("Dash Branch Error", e);
+            document.getElementById('dash-branches').textContent = "-";
+        });
+
+    // 3. AI Insights
+    fetch(`${API_BASE}/api/ai/dashboard`)
+        .then(r => r.json())
+        .then(aiRes => {
+            if (typeof applyAiDashboardToCards === 'function') applyAiDashboardToCards(aiRes);
+        })
+        .catch(e => console.error("Dash AI Error", e));
+
+    // 4. Update Time & Expiring
+    document.getElementById('dash-timestamp').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const expiringCount = window.bellState?.expiringItems?.length || 0;
+    const expEl = document.getElementById('dash-expiring');
+    if (expEl) expEl.textContent = expiringCount;
+}
+
+// Helper to render restock table (extracted for clarity)
+function renderRestockTable(lowStockItems) {
+    const restockTable = document.getElementById('dash-restock-table');
+    if (!restockTable) return;
+
+    restockTable.innerHTML = '';
+    const criticalItems = lowStockItems
+        .sort((a, b) => ((a.quantity - a.reorder_level) - (b.quantity - b.reorder_level)))
+        .slice(0, 5);
+
+    if (criticalItems.length === 0) {
+        restockTable.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center text-slate-400 text-xs font-medium">✅ All stock levels healthy</td></tr>`;
+    } else {
+        criticalItems.forEach(item => {
+            const row = `
+            <tr class="border-b border-slate-50 last:border-0 hover:bg-brand-50/50">
+                <td class="px-4 md:px-6 py-3">
+                    <div class="font-bold text-slate-700 text-sm">${item.name}</div>
+                    <div class="md:hidden text-[10px] text-slate-400 font-medium">${item.branch}</div> 
+                </td>
+                <td class="px-4 md:px-6 py-3 text-right font-bold text-rose-600">${item.quantity}</td>
+                <td class="px-4 md:px-6 py-3 text-center">
+                    <button onclick="openRestockModal('${item.name.replace(/'/g, "\\'")}', '${item.branch}', ${item.quantity})" 
+                        class="bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white px-3 py-1.5 rounded-lg text-[10px] font-bold transition">
+                        Restock
+                    </button>
+                </td>
+            </tr>`;
+            restockTable.innerHTML += row;
+        });
     }
 }
 // ==========================================
@@ -234,92 +363,6 @@ window.onload = function () {
         hideSplashScreen();
     }, 2500);
 };
-
-
-// ==========================================
-// 3. DASHBOARD LOGIC
-// ==========================================
-
-
-async function initDashboard() {
-    console.log("Initializing Dashboard...");
-    try {
-        // 1. Fetch data from all necessary endpoints simultaneously
-        const [invRes, branchRes, aiRes] = await Promise.all([
-            fetch(API_URL).then(r => r.json()),
-            fetch(BRANCHES_API_URL).then(r => r.json()),
-            fetch(`${API_BASE}/api/ai/dashboard`).then(r => r.json())
-        ]);
-
-        // 2. Perform Calculations
-        const totalValue = invRes.reduce((acc, item) => acc + ((item.price || 0) * (item.quantity || 0)), 0);
-        const lowStockItems = invRes.filter(item => (item.quantity || 0) <= (item.reorder_level || 0));
-        const expiringCount = window.bellState?.expiringItems?.length || 0;
-
-        const els = {
-            total: document.getElementById('dash-total-value'),
-            low: document.getElementById('dash-low-stock'),
-            expiring: document.getElementById('dash-expiring'),
-            branches: document.getElementById('dash-branches'),
-            time: document.getElementById('dash-timestamp')
-        };
-
-        if (els.total) els.total.textContent = `₱${totalValue.toLocaleString('en-PH', { maximumFractionDigits: 0 })}`;
-        if (els.low) els.low.textContent = lowStockItems.length;
-        if (els.expiring) els.expiring.textContent = expiringCount;
-        if (els.branches) els.branches.textContent = branchRes.length;
-        if (els.time) els.time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        if (aiRes && typeof applyAiDashboardToCards === 'function') {
-            applyAiDashboardToCards(aiRes);
-        }
-
-        const restockTable = document.getElementById('dash-restock-table');
-        if (restockTable) {
-            restockTable.innerHTML = '';
-
-
-            const criticalItems = lowStockItems
-                .sort((a, b) => ((a.quantity - a.reorder_level) - (b.quantity - b.reorder_level)))
-                .slice(0, 5);
-
-            if (criticalItems.length === 0) {
-                restockTable.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-slate-400 text-xs font-medium">✅ All stock levels healthy</td></tr>`;
-            } else {
-                // //////////////////////////////////////// //
-                //      THEMED DASHBOARD RESTOCK TABLE        //
-                // //////////////////////////////////////// //
-                // Inside your initDashboard() function:
-                criticalItems.forEach(item => {
-                    const row = `
-    <tr class="border-b border-slate-50 last:border-0 transition-colors hover:bg-brand-50/50">
-        <td class="px-4 md:px-6 py-3">
-            <div class="font-bold text-slate-700 text-sm">${item.name}</div>
-            <div class="md:hidden text-[10px] text-slate-400 font-medium">${item.branch}</div> 
-        </td>
-        <td class="hidden md:table-cell px-6 py-3 text-xs text-slate-500">${item.branch}</td> 
-        <td class="px-4 md:px-6 py-3 text-right font-bold text-rose-600">${item.quantity}</td>
-        <td class="px-4 md:px-6 py-3 text-center">
-            <button onclick="openRestockModal('${item.name.replace(/'/g, "\\'")}', '${item.branch}', ${item.quantity})" 
-                class="bg-brand-50 text-brand-600 hover:bg-brand-600 hover:text-white px-3 py-1.5 rounded-lg text-[10px] font-bold transition shadow-sm">
-                Restock
-            </button>
-        </td>
-    </tr>`;
-                    restockTable.innerHTML += row;
-                });
-            }
-        }
-
-        if (typeof renderGradientBranchChart === 'function') renderGradientBranchChart(invRes);
-        if (typeof renderCategoryDoughnut === 'function') renderCategoryDoughnut(invRes);
-        if (typeof initAIModule === 'function') initAIModule();
-
-    } catch (err) {
-        console.error("Dashboard Init Error:", err);
-    }
-}
-
 
 // Gradient Bar Chart
 function renderGradientBranchChart(inventory) {
@@ -1004,18 +1047,54 @@ fetch(`${API_BASE}/api/batches`)
 
 
 
-// ==========================================
-// 6. ADD BATCH MODAL
-// ==========================================
+// //////////////////////////////////////// //
+//      ADD BATCH MODAL (Branch Auto-Detect)  //
+// //////////////////////////////////////// //
 
 function openBatchOverlay() {
     const overlay = document.getElementById('batchOverlay');
     if (overlay) overlay.classList.remove('hidden');
-    // Sync logic
-    fetchBranches(branches => {
-        if (typeof updateBranchSelect === 'function') updateBranchSelect(branches);
-        updateBatchBranchSelect(branches);
-    });
+
+    const btn = document.getElementById('batchBranchBtn');
+    const label = document.getElementById('batchBranchLabel');
+    const input = document.getElementById('batch_branch');
+
+    // 🔒 STAFF LOGIC: Auto-detect & Lock
+    if (currentUser && currentUser.role === 'staff') {
+        // 1. Force the hidden input value to their branch
+        if (input) input.value = currentUser.branch;
+
+        // 2. Lock the UI (Grey out button, add lock icon)
+        if (btn) {
+            btn.onclick = null; // Disable clicking
+            btn.classList.add('bg-slate-50', 'text-slate-400', 'cursor-not-allowed');
+            btn.classList.remove('bg-white', 'text-slate-700');
+
+            // Update label with Lock Icon
+            btn.innerHTML = `<span id="batchBranchLabel" class="flex items-center gap-2"><i class="fas fa-lock text-[10px]"></i> ${currentUser.branch}</span>`;
+        }
+
+    } else {
+        // 🔓 ADMIN/OWNER LOGIC: Allow Selection
+
+        // 1. Enable Clicking
+        if (btn) {
+            btn.onclick = toggleBatchBranchMenu; // Restore click event
+            btn.classList.remove('bg-slate-50', 'text-slate-400', 'cursor-not-allowed');
+            btn.classList.add('bg-white', 'text-slate-700');
+
+            // Restore "Select..." text if empty
+            if (input && !input.value) {
+                btn.innerHTML = `<span id="batchBranchLabel">Select...</span> ▼`;
+            }
+        }
+
+        // 2. Fetch and Populate Branch List
+        fetchBranches(branches => {
+            if (typeof updateBranchSelect === 'function') updateBranchSelect(branches);
+            updateBatchBranchSelect(branches);
+        });
+    }
 }
 
 function closeBatchOverlay() {
@@ -1495,6 +1574,7 @@ async function fetchOrders() {
 // //////////////////////////////////////// //
 //      THEMED & ALIGNED ORDERS RENDERER     //
 // //////////////////////////////////////// //
+// [main.js] - Ensure this function handles the UI correctly
 function renderOrdersTable(orders) {
     const tbody = document.getElementById('ordersTableBody');
     if (!tbody) return;
@@ -1506,15 +1586,34 @@ function renderOrdersTable(orders) {
     }
 
     orders.forEach(o => {
-        const badge = o.status === 'pending'
+        // Status Badge logic
+        const isPending = o.status === 'pending';
+        const badge = isPending
             ? `<span class="px-2 py-0.5 rounded-md bg-amber-50 text-amber-600 text-[10px] font-bold border border-amber-100">Pending</span>`
-            : `<span class="px-2 py-0.5 rounded-md bg-brand-50 text-brand-600 text-[10px] font-bold border border-brand-100">Received</span>`;
+            : `<span class="px-2 py-0.5 rounded-md bg-emerald-50 text-brand-600 text-[10px] font-bold border border-brand-100">Received</span>`;
 
-        // DATE LOGIC: Ensure column 5 is populated
         const dateStr = o.created_at ? new Date(o.created_at).toLocaleDateString() : '-';
+        const isNewItemReq = o.notes && o.notes.includes("[NEW ITEM REQUEST]");
+        const itemDisplay = isNewItemReq
+            ? `<div class="font-bold text-slate-800 text-sm">${o.item} <span class="bg-brand-600 text-white text-[9px] px-1.5 py-0.5 rounded ml-1 uppercase tracking-wider font-bold shadow-sm">New Item</span></div>`
+            : `<div class="font-bold text-slate-700 text-sm leading-tight">${o.item}</div>`;
+        // Action Button: Only Admins can usually "Receive". Staff just see status.
+        // We can simply show the status for now.
+        let actionBtn = '';
+        if (isPending) {
+            // If Admin/Owner, show Receive. If Staff, show "Waiting"
+            if (currentUser.role === 'staff') {
+                actionBtn = `<span class="text-slate-400 text-[10px] italic">Awaiting Approval</span>`;
+            } else {
+                actionBtn = `<button onclick="showToast('Feature coming soon')" 
+                         class="bg-brand-600 hover:bg-brand-900 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold transition shadow-sm">Receive</button>`;
+            }
+        } else {
+            actionBtn = `<span class="text-emerald-600 font-bold text-[10px] flex items-center justify-center gap-1"><i class="fas fa-check-circle"></i> Complete</span>`;
+        }
 
         tbody.innerHTML += `
-        <tr class="hover:bg-brand-50/20 transition group">
+        <tr class="hover:bg-brand-50/20 transition border-b border-slate-50 last:border-0">
             <td class="px-6 py-4 font-mono text-[10px] text-slate-400">#PO-${(o._id || o.id || '???').slice(-4)}</td>
             <td class="px-6 py-4">
                 <div class="font-bold text-slate-700 text-sm leading-tight">${o.item}</div>
@@ -1523,19 +1622,10 @@ function renderOrdersTable(orders) {
             <td class="px-6 py-4 text-xs text-slate-500 font-medium">${o.branch}</td>
             <td class="px-6 py-4 text-center">${badge}</td>
             <td class="px-6 py-4 text-xs text-slate-500 font-medium">${dateStr}</td>
-            <td class="px-6 py-4 text-center">
-                ${o.status === 'pending'
-                ? `<button onclick="showToast('Feature coming soon')" 
-                         class="bg-brand-600 hover:bg-brand-900 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold transition shadow-sm">Receive</button>`
-                : `<span class="text-brand-600 font-bold text-[10px] flex items-center justify-center gap-1">
-                         <i class="fas fa-check-circle"></i> Complete
-                       </span>`
-            }
-            </td>
+            <td class="px-6 py-4 text-center">${actionBtn}</td>
         </tr>`;
     });
 }
-
 // ==========================================
 // 9. BRANCHES MANAGEMENT (FIXED)
 // ==========================================
@@ -1843,15 +1933,146 @@ function hideSplashScreen() {
     }
 }
 
+// //////////////////////////////////////// //
+//      ✨ REQUEST NEW ITEM LOGIC            //
+// //////////////////////////////////////// //
+
+function openNewItemModal() {
+    const modal = document.getElementById('newItemOverlay');
+    if (modal) {
+        modal.classList.remove('hidden');
+
+        // Reset Inputs
+        document.getElementById('req_new_name').value = '';
+        document.getElementById('req_new_qty').value = '1';
+        document.getElementById('req_new_link').value = '';
+        document.getElementById('req_new_notes').value = '';
+
+        // ➤ RESET PRIORITY DROPDOWN
+        selectPriority('normal', 'Normal');
+    }
+}
+
+function closeNewItemModal() {
+    const modal = document.getElementById('newItemOverlay');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function submitNewItemRequest(e) {
+    e.preventDefault();
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> Sending...`;
+    btn.disabled = true;
+
+    try {
+        const name = document.getElementById('req_new_name').value;
+        const qty = document.getElementById('req_new_qty').value;
+        const priority = document.getElementById('req_new_priority').value;
+        const link = document.getElementById('req_new_link').value;
+        const notes = document.getElementById('req_new_notes').value;
+
+        // Tag the notes so Admin knows it's a new item request
+        const finalNotes = `[NEW ITEM REQUEST] ${notes} ${link ? `(Link: ${link})` : ''}`;
+
+        const payload = {
+            item: name,
+            branch: currentUser.branch, // Auto-lock to their branch
+            quantity: parseInt(qty),
+            supplier: "To Be Determined", // Placeholder since item doesn't exist
+            priority: priority,
+            notes: finalNotes,
+            status: 'pending',
+            created_at: new Date().toISOString()
+        };
+
+        const res = await fetch(ORDERS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error("Failed to submit request");
+
+        showToast("Request submitted successfully!");
+        closeNewItemModal();
+
+        // Refresh orders list immediately
+        if (!document.getElementById('orders-section').classList.contains('hidden')) {
+            fetchOrders();
+        }
+
+    } catch (err) {
+        console.error(err);
+        alert("Error sending request: " + err.message);
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+// //////////////////////////////////////// //
+//      ✨ PRIORITY DROPDOWN LOGIC           //
+// //////////////////////////////////////// //
+
+// 1. Toggle Menu Visibility
+function togglePriorityMenu() {
+    const menu = document.getElementById('priorityDropdownOptions');
+    const btn = document.getElementById('priorityDropdownBtn');
+
+    if (menu.classList.contains('hidden')) {
+        // Open
+        menu.classList.remove('hidden');
+        btn.classList.add('border-brand-600', 'ring-2', 'ring-brand-100'); // Focus state
+    } else {
+        // Close
+        menu.classList.add('hidden');
+        btn.classList.remove('border-brand-600', 'ring-2', 'ring-brand-100');
+    }
+}
+
+// 2. Select an Option
+function selectPriority(value, label) {
+    // Update Hidden Input
+    document.getElementById('req_new_priority').value = value;
+
+    // Update Button Text
+    const labelEl = document.getElementById('priorityLabel');
+
+    if (value === 'high') {
+        // Style for High Priority (Rose/Red theme)
+        labelEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500"></span> ${label}`;
+        labelEl.className = "flex items-center gap-2 text-rose-600";
+    } else {
+        // Style for Normal (Emerald/Slate theme)
+        labelEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> ${label}`;
+        labelEl.className = "flex items-center gap-2 text-brand-900";
+    }
+
+    // Close Menu
+    togglePriorityMenu();
+}
+
+// 3. Close menu if clicked outside
+document.addEventListener('click', function (e) {
+    const btn = document.getElementById('priorityDropdownBtn');
+    const menu = document.getElementById('priorityDropdownOptions');
+
+    if (btn && menu && !btn.contains(e.target) && !menu.contains(e.target)) {
+        menu.classList.add('hidden');
+        btn.classList.remove('border-brand-600', 'ring-2', 'ring-brand-100');
+    }
+});
+
 
 // ==========================================
 // 10. ANALYTICS PAGE LOGIC (Updated)
 // ==========================================
 
-
-function initAnalyticsOverview() {
-    // 1. Fetch KPI Data (Overview)
-    fetch(`${API_BASE}/analytics/overview`)
+function fetchAnalyticsOverview(branchName = 'All') {
+    // It passes the branchName to the Python backend
+    fetch(`${API_BASE}/analytics/overview?branch=${encodeURIComponent(branchName)}`)
         .then(res => res.json())
         .then(d => {
             if (document.getElementById("an-new-items")) document.getElementById("an-new-items").textContent = d.new_items;
@@ -1860,15 +2081,45 @@ function initAnalyticsOverview() {
             if (document.getElementById("an-branches")) document.getElementById("an-branches").textContent = d.branches;
         })
         .catch(err => console.error("Analytics overview error", err));
+}
 
-    // 2. Fetch Lists
+function initAnalyticsOverview() {
+    // Default to 'All' for Owner/Admin
+    let targetBranch = 'All';
+    const tabContainer = document.getElementById('analyticsBranchTabs');
+
+    // 🔒 FRONTEND LOCK: Check if the logged-in user is Staff
+    if (currentUser && currentUser.role === 'staff') {
+        // Force the target branch to their assigned branch
+        targetBranch = currentUser.branch;
+
+        // Update the global state variable (if used by other chart functions)
+        currentAnalyticsBranch = currentUser.branch;
+
+        // Hide the branch tabs so they cannot switch to others
+        if (tabContainer) tabContainer.classList.add('hidden');
+    } else {
+        // --- ADMIN & OWNER LOGIC ---
+        // They are allowed to see tabs and switch branches
+        if (tabContainer) tabContainer.classList.remove('hidden');
+
+        // Reset global state to 'All' so they see the big picture first
+        currentAnalyticsBranch = 'All';
+    }
+
+    // 1. Fetch KPI Data (Overview) - Passes the locked branch or 'All'
+    fetchAnalyticsOverview(targetBranch);
+
+    // 2. Fetch Lists (Top Products, Low Stock tables)
     fetchAnalyticsLists();
 
-    // 3. Render Branch Tabs (Automated Navigation)
-    renderAnalyticsTabs();
+    // 3. Render Branch Tabs (Only run this if they are NOT staff)
+    if (!currentUser || currentUser.role !== 'staff') {
+        renderAnalyticsTabs();
+    }
 
-    // 4. Fetch Charts (Default: All)
-    fetchAnalyticsCharts('All');
+    // 4. Fetch Charts (Passes the locked branch or 'All')
+    fetchAnalyticsCharts(targetBranch);
 }
 
 // NEW: Automates the Branch Tabs
@@ -2418,34 +2669,6 @@ function toggleMobileMenu() {
     }
 }
 
-// //////////////////////////////////////// //
-//      👮 ROLE PERMISSIONS HANDLER           //
-// //////////////////////////////////////// //
-function applyRolePermissions() {
-    if (!currentUser) return;
-
-    // Elements to hide for Staff
-    const adminMenuBtn = document.getElementById('adminMenuBtn');
-    const mobileAdminMenu = document.getElementById('mobileAdminMenu'); // ➤ Mobile target
-
-    // Elements only for Owner
-    const ownerSettingsBtn = document.getElementById('ownerSettingsBtn');
-    const mobileSettingsBtn = document.getElementById('mobileSettingsBtn'); // ➤ Mobile target
-
-    if (currentUser.role === 'staff') {
-        if (adminMenuBtn) adminMenuBtn.classList.add('hidden');
-        if (mobileAdminMenu) mobileAdminMenu.classList.add('hidden');
-    } else {
-        if (adminMenuBtn) adminMenuBtn.classList.remove('hidden');
-        if (mobileAdminMenu) mobileAdminMenu.classList.remove('hidden');
-    }
-
-    // Special check for owner-level settings
-    if (currentUser.role === 'owner') {
-        if (ownerSettingsBtn) ownerSettingsBtn.classList.remove('hidden');
-        if (mobileSettingsBtn) mobileSettingsBtn.classList.remove('hidden');
-    }
-}
 
 
 // ==========================================
@@ -3567,4 +3790,3 @@ async function fetchPriceInsights() {
         if (summaryEl) summaryEl.innerHTML = "LUX is currently calculating trends...";
     }
 }
-
