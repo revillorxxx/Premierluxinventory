@@ -313,7 +313,8 @@
       </div>
     </header>
 
-    <div id="mobileMenu" class="hidden md:hidden absolute top-16 left-0 right-0 px-3 z-[100] animate-fade-in">
+    <div id="mobileMenu" class="hidden md:!hidden fixed top-20 left-0 right-0 px-3 z-[100] animate-fade-in">
+
       <div
         class="bg-brand-900 border border-white/10 rounded-2xl p-4 shadow-2xl flex flex-col gap-4 text-slate-100 overflow-y-auto max-h-[85vh] custom-scrollbar">
 
@@ -326,27 +327,31 @@
           <p class="text-[8px] font-bold text-brand-100/40 uppercase tracking-widest ml-2">Inventory</p>
           <div class="grid grid-cols-2 gap-2">
             <button onclick="showPage('inventory'); toggleMobileMenu()"
-              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">📦
-              List</button>
+              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">
+              📦 List
+            </button>
             <button onclick="showPage('qr'); toggleMobileMenu()"
-              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">📷 QR
-              Tracking</button>
+              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">
+              📷 QR Tracking
+            </button>
           </div>
         </div>
 
-        <div class="space-y-1">
+        <div id="mobileProcurementSection" class="space-y-1">
           <p class="text-[8px] font-bold text-brand-100/40 uppercase tracking-widest ml-2">Procurement</p>
           <div class="grid grid-cols-2 gap-2">
             <button onclick="showPage('suppliers'); toggleMobileMenu()"
-              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">🤝
-              Suppliers</button>
+              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">
+              🤝 Suppliers
+            </button>
             <button onclick="showPage('orders'); toggleMobileMenu()"
-              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">📝
-              Orders</button>
+              class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-left text-xs flex items-center gap-2">
+              📝 Orders
+            </button>
           </div>
         </div>
 
-        <div id="mobileAdminMenu" class="space-y-2 border-t border-white/5 pt-4">
+        <div id="mobileAdminMenu" class="space-y-2 border-t border-white/10 pt-4">
           <p class="text-[9px] font-bold text-brand-100/40 uppercase tracking-widest ml-3">Administration</p>
 
           <div class="grid grid-cols-2 gap-2">
@@ -378,10 +383,12 @@
             <span>⚙️</span> System Settings
           </button>
         </div>
+
         <button onclick="doLogout()"
           class="mt-1 p-3 rounded-xl bg-[#7D8C7D] text-white text-center font-bold shadow-lg active:scale-95 transition text-sm">
           <i class="fas fa-sign-out-alt mr-2"></i> Sign Out
         </button>
+
       </div>
     </div>
 
@@ -555,6 +562,9 @@
                   <div id="branchDropdownOptions"
                     class="hidden absolute top-full left-0 mt-1 w-full md:w-48 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto custom-scrollbar p-1 z-50">
                   </div>
+
+                  <input type="hidden" id="branchFilter" value="All">
+
                 </div>
 
                 <div class="relative flex-[1.5] md:flex-none group">
@@ -650,6 +660,18 @@
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div class="flex flex-col md:flex-row gap-2">
+            <button onclick="fetchOrders()"
+              class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-bold hover:bg-brand-50 transition">All</button>
+            <button onclick="fetchOrders('pending')"
+              class="px-4 py-2 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 text-xs font-bold">Pending</button>
+
+            <button id="btnRequestNewItem" onclick="openNewItemModal()"
+              class="hidden px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-bold shadow-md shadow-brand-900/10 hover:bg-brand-700 transition flex items-center gap-2 transform active:scale-95">
+              <i class="fas fa-plus-circle"></i> Request New Item
+            </button>
           </div>
         </section>
 
@@ -750,7 +772,8 @@
             </div>
           </div>
 
-          <div class="bg-white border border-slate-200 rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-md">
+          <div id="lux-market-widget"
+            class="bg-white border border-slate-200 rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-md">
             <div class="flex items-center justify-between mb-4 md:mb-6">
               <div>
                 <h3 class="text-sm md:text-lg font-extrabold text-brand-900">Market Intelligence</h3>
@@ -1391,7 +1414,7 @@
             id="restock_notes" rows="2"
             class="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm"></textarea></div>
         <button type="submit"
-          class="w-full py-3.5 rounded-2xl bg-brand-600 hover:bg-emerald-700 text-white font-bold shadow-lg">Submit
+          class="w-full py-3.5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-lg">Submit
           Request</button>
       </form>
     </div>
@@ -1683,6 +1706,97 @@
         <i class="fas fa-tooth"></i>
       </span>
     </button>
+  </div>
+
+  <div id="newItemOverlay"
+    class="fixed inset-0 bg-brand-900/40 backdrop-blur-sm flex items-center justify-center z-[80] hidden">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 border border-slate-100 relative overflow-hidden">
+
+      <div class="flex justify-between items-center mb-6 relative z-10">
+        <h2 class="text-2xl font-black text-brand-900 tracking-tight">Request Instrument</h2>
+        <button type="button" onclick="closeNewItemModal()"
+          class="w-8 h-8 flex items-center justify-center rounded-full bg-slate-50 text-slate-400 hover:text-brand-600 transition">✕</button>
+      </div>
+
+      <form onsubmit="submitNewItemRequest(event)" class="space-y-5 relative z-10">
+
+        <div class="bg-brand-50 p-4 rounded-2xl flex gap-4 border border-brand-100">
+          <div
+            class="h-10 w-10 rounded-xl bg-white text-brand-600 flex items-center justify-center text-lg font-bold shadow-sm border border-brand-50">
+            ✨</div>
+          <div>
+            <h3 class="font-bold text-brand-900 text-sm">Not in Inventory?</h3>
+            <p class="text-[10px] text-brand-800/60 leading-relaxed">Request new instruments or supplies here. Admin
+              will
+              review and add them to the system.</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Item
+            Description</label>
+          <input id="req_new_name" type="text" required placeholder="e.g. Posterior Composite Instrument"
+            class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-brand-900 text-sm font-bold focus:ring-2 focus:ring-brand-100 focus:border-brand-600 outline-none transition placeholder:font-normal shadow-sm">
+        </div>
+
+        <div class="grid grid-cols-2 gap-5">
+          <div>
+            <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Quantity</label>
+            <input id="req_new_qty" type="number" min="1" value="1" required
+              class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-brand-900 font-bold outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100 shadow-sm">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Priority</label>
+
+            <div class="relative">
+              <button type="button" id="priorityDropdownBtn" onclick="togglePriorityMenu()"
+                class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-brand-900 font-bold flex items-center justify-between outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100 shadow-sm transition-all">
+                <span id="priorityLabel" class="flex items-center gap-2">Normal</span>
+                <i class="fas fa-chevron-down text-xs text-slate-400"></i>
+              </button>
+
+              <div id="priorityDropdownOptions"
+                class="hidden absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in-down">
+
+                <button type="button" onclick="selectPriority('normal', 'Normal')"
+                  class="w-full text-left px-4 py-3 text-sm font-bold text-slate-600 hover:bg-brand-50 hover:text-brand-900 transition flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Normal
+                </button>
+
+                <button type="button" onclick="selectPriority('high', 'High Priority 🔥')"
+                  class="w-full text-left px-4 py-3 text-sm font-bold text-slate-600 hover:bg-rose-50 hover:text-rose-600 transition flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-rose-500"></span> High Priority 🔥
+                </button>
+
+              </div>
+
+              <input type="hidden" id="req_new_priority" value="normal">
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Reference Link
+            (Optional)</label>
+          <input id="req_new_link" type="text" placeholder="https://..."
+            class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-brand-900 text-sm focus:ring-2 focus:ring-brand-100 focus:border-brand-600 outline-none transition shadow-sm">
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Reason /
+            Details</label>
+          <textarea id="req_new_notes" rows="2" placeholder="Why is this needed?"
+            class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-brand-900 text-sm outline-none resize-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100 shadow-sm"></textarea>
+        </div>
+
+        <button type="submit"
+          class="w-full py-3.5 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-lg shadow-brand-900/20 transition transform active:scale-95 flex items-center justify-center gap-2">
+          <span>Submit Request</span>
+          <i class="fas fa-paper-plane"></i>
+        </button>
+      </form>
+    </div>
   </div>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
