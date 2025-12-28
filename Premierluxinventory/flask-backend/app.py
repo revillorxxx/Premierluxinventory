@@ -17,6 +17,7 @@ import uuid
 import string
 import random
 
+
 # ---------- Flask + CORS Setup ----------
 
 # WE TELL FLASK TO LOOK UP ONE FOLDER (../frontend) FOR TEMPLATES
@@ -285,7 +286,21 @@ def delete_user(user_id):
 
 @app.route("/api/inventory", methods=["GET"])
 def get_inventory():
-    items = list(inventory_collection.find({}, {"_id": 0}))
+    query = {}
+    
+    # 🔒 SECURITY: If Staff, FORCE their branch
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        query["branch"] = session.get("branch")
+
+    # If your frontend sends ?q=search or ?branch=filter, we respect search but override branch
+    requested_branch = request.args.get("branch")
+    
+    # Only allow switching branch if NOT restricted
+    if requested_branch and "branch" not in query: 
+        if requested_branch != "All":
+            query["branch"] = requested_branch
+
+    items = list(inventory_collection.find(query, {"_id": 0}))
     return jsonify(items)
 
 @app.route("/api/inventory", methods=["POST"])
@@ -359,10 +374,15 @@ def adjust_inventory(name):
 # ---------- BATCHES ----------
 @app.route("/api/batches", methods=["GET"])
 def get_batches():
-    # Fetch all fields. Convert _id to string for JSON compatibility.
-    batches = list(batches_collection.find({}))
+    query = {}
+    
+    # 🔒 SECURITY: Enforce Branch Isolation
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        query["branch"] = session.get("branch")
+
+    batches = list(batches_collection.find(query))
     for b in batches:
-        b['_id'] = str(b['_id']) # Convert ObjectId to string
+        b['_id'] = str(b['_id']) 
     return jsonify(batches), 200
 
 @app.route("/api/batches", methods=["POST"])
@@ -519,41 +539,23 @@ def get_ai_dashboard():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
-        # 1. SETUP GROQ CLIENT
-        # We use the global GROQ_API_KEY defined at the top of app.py
-        # to ensure it can be updated via Render Environment Variables.
         ai_client = Groq(api_key=GROQ_API_KEY)
-
         data = request.json or {}
         user_message = data.get("message", "").strip()
-        image_data = data.get("image") # Base64 string
+        image_data = data.get("image")
 
-        # 2. GATHER SYSTEM CONTEXT (Inventory Data)
-        try:
-            # Get a quick snapshot of the inventory to guide the AI
-            total_items = inventory_collection.count_documents({})
-            low_stock = list(inventory_collection.find(
-                {"$expr": {"$lte": ["$quantity", "$reorder_level"]}},
-                {"_id": 0, "name": 1, "quantity": 1, "branch": 1}
-            ))
-            
-            # Limit context size to prevent errors
-            inventory_summary = f"Total Items: {total_items}. Low Stock Items: {json.dumps(low_stock[:20])}"
-        except Exception:
-            inventory_summary = "Inventory data currently unavailable."
-
-        # 3. DEFINE SYSTEM PROMPT
+        # CONTEXT INJECTION
+        user_role = session.get("role", "staff")
+        user_branch = session.get("branch", "Main")
+        
         system_prompt = f"""
         You are LUX, the AI assistant for PremierLux Dental.
-        Your Tone: Professional, concise, and helpful.
+        User Context: Role='{user_role}', Branch='{user_branch}'.
         
-        Current Inventory Status:
-        {inventory_summary}
-        
-        Rules:
-        - If the user asks about stock, check the 'Low Stock Items' list above first.
-        - If an image is provided, analyze it (e.g., identify dental tools, read expiration dates).
-        - Keep answers short (under 3 sentences) unless asked for details.
+        Strict Rules:
+        1. If Role is 'staff', ONLY discuss items in '{user_branch}'. DO NOT reveal global stats, supplier prices, or admin settings.
+        2. If Role is 'admin' or 'owner', you have full access.
+        3. Keep answers professional and concise.
         """
 
         # 4. PREPARE MESSAGE FOR GROQ
@@ -607,26 +609,83 @@ def chat():
         }), 200
 
     except Exception as e:
-        # If this fails, check the Render Logs for the exact error message
-        print(f"LUX Error: {e}")
-        return jsonify({
-            "type": "error", 
-            "text": "⚠️ I'm currently offline or check your API Key."
-        }), 500
-# ---------- BRANCHES ----------
-
-# ---------- BRANCHES (FIXED) ----------
+        return jsonify({"type": "error", "text": "LUX is offline."}), 500
 
 from bson.objectid import ObjectId # Ensure this is at the top of app.py
 
 @app.route("/api/branches", methods=["GET"])
 def get_branches():
-    # ➤ FIX: Do NOT hide _id. We need it to edit and delete.
-    branches = list(branches_collection.find({}))
+    query = {}
+    
+    # 🔒 LOCK: Staff can only see their own branch
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        query["name"] = session.get("branch")
+
+    branches = list(branches_collection.find(query))
     for b in branches:
-        b["_id"] = str(b["_id"]) # Convert MongoDB ID to string for JS
+        b["_id"] = str(b["_id"]) 
     return jsonify(branches)
 
+@app.route('/api/ai/analyze', methods=['GET'])
+def ai_analyze_inventory():
+    try:
+        groq_client = Groq(api_key=GROQ_API_KEY) 
+        
+        # 🔒 LOCK: Filter inventory context by role
+        query = {}
+        if session.get("role") == "staff" and session.get("branch") != "All":
+            query["branch"] = session.get("branch")
+
+        # Fetch inventory snapshot (Filtered)
+        cursor = inventory_collection.find(query, {
+            "_id": 0, "name": 1, "quantity": 1, "reorder_level": 1, 
+            "branch": 1
+        }).sort("quantity", 1).limit(20)
+        
+        items = list(cursor)
+        
+        # Handle empty branch inventory
+        if not items:
+            return jsonify({
+                "insight_text": f"No inventory data found for {session.get('branch', 'this branch')}.", 
+                "status_badge": "Unknown",
+                "recommended_order": []
+            }), 200
+
+        data_str = json.dumps(items)
+
+        # Force the AI to return specific keys
+        completion = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are LUX, a supply chain AI. Output ONLY JSON. Use keys: 'insight_text' (2-sentence summary), 'status_badge' ('Healthy', 'Warning', 'Critical'), 'recommended_order' (list of items)."
+                },
+                {
+                    "role": "user", 
+                    "content": f"Analyze this inventory and identify risks or trends: {data_str}"
+                }
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+
+        ai_data = json.loads(completion.choices[0].message.content)
+        
+        # Safety defaults
+        if "insight_text" not in ai_data: ai_data["insight_text"] = "Inventory levels are stable."
+        if "status_badge" not in ai_data: ai_data["status_badge"] = "Healthy"
+
+        return jsonify(ai_data), 200
+
+    except Exception as e:
+        print(f"Groq Analyze Error: {e}")
+        return jsonify({
+            "insight_text": "LUX is currently calculating inventory velocity...", 
+            "status_badge": "Offline"
+        }), 200
+    
 @app.route("/api/branches", methods=["POST"])
 def add_branch():
     data = request.json or {}
@@ -707,11 +766,12 @@ def api_branches_count():
 
 @app.route("/api/suppliers", methods=["GET"])
 def get_suppliers():
+    # 🔒 STAFF cannot see suppliers
+    if session.get("role") == "staff":
+        return jsonify([]) # Return empty list so UI doesn't crash, but shows nothing
+
     suppliers = list(suppliers_collection.find({}, {"_id": 0}))
     return jsonify(suppliers), 200
-
-
-# ... inside app.py ...
 
 @app.route("/api/suppliers", methods=["POST"])
 def add_supplier():
@@ -770,11 +830,19 @@ def delete_supplier(name):
 
 @app.route("/api/orders", methods=["GET"])
 def get_orders():
-    # Fetch all orders, newest first
-    orders = list(orders_collection.find({}).sort("created_at", -1))
+    query = {}
+
+    # 🔒 LOCK: Staff only see orders for their branch
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        query["branch"] = session.get("branch")
+
+    # Fetch orders, newest first
+    orders = list(orders_collection.find(query).sort("created_at", -1))
+    
     for o in orders:
-        o["_id"] = str(o["_id"])  # Convert ObjectId to string
-    return jsonify(orders), 200
+        o["_id"] = str(o["_id"])
+        
+    return jsonify(orders), 200 
 
 @app.route("/api/orders", methods=["POST"])
 def create_order():
@@ -797,21 +865,25 @@ def create_order():
 
 @app.get("/api/alerts")
 def get_alerts():
-    # 1. Setup User ID: Use the logged-in user from the session
-    user_id = session.get("user_email")  # <--- ✅ FIX: Matches acknowledge_alert logic
+    user_id = session.get("user_email")
+    role = session.get("role", "staff")
+    user_branch = session.get("branch")
 
     alerts = []
-    low_by_branch = {}
+    
+    # --- 1. STOCK ALERTS (Branch Specific) ---
+    query = {}
+    if role == "staff" and user_branch and user_branch != 'All':
+        query["branch"] = user_branch
 
-    # 2. INVENTORY ALERTS (Low Stock & Expiry)
-    items = list(inventory_collection.find({}))
+    items = list(inventory_collection.find(query))
 
     for item in items:
         name = item.get("name")
-        branch = item.get("branch", "Main branch")
+        branch = item.get("branch", "Main")
         qty = item.get("quantity", 0)
         reorder = item.get("reorder_level", 0)
-        expiry = item.get("expiry_date")
+        expiry = item.get("expiry_date") or item.get("exp_date")
 
         # Low Stock
         if reorder and qty <= reorder:
@@ -819,11 +891,10 @@ def get_alerts():
                 "id": f"low-stock-{branch}-{name}",
                 "type": "low_stock",
                 "severity": "high",
-                "title": f"Low stock: {name}",
+                "title": f"Low Stock: {name}",
                 "description": f"{qty} units left (Reorder: {reorder}) in {branch}.",
                 "branch": branch,
             })
-            low_by_branch[branch] = low_by_branch.get(branch, 0) + 1
 
         # Expiry
         if expiry and expiry_within_days(expiry, 30):
@@ -831,35 +902,24 @@ def get_alerts():
                 "id": f"expiry-{branch}-{name}",
                 "type": "expiry_risk",
                 "severity": "medium",
-                "title": f"Expiry Risk: {name}",
+                "title": f"Expiring: {name}",
                 "description": f"Batch expiring soon in {branch}.",
                 "branch": branch,
             })
 
-    # 3. BRANCH AGGREGATE ALERTS
-    for branch, count in low_by_branch.items():
-        if count >= 3:
+    if role in ["admin", "owner"]:
+        
+        pending_orders = list(orders_collection.find({"status": "pending"}))
+        
+        for order in pending_orders:
             alerts.append({
-                "id": f"branch-low-{branch}",
-                "type": "branch_low_stock",
-                "severity": "high",
-                "title": f"Branch Alert: {branch}",
-                "description": f"{count} items are low on stock in {branch}.",
-                "branch": branch,
+                "id": f"order-{str(order['_id'])}",
+                "type": "pending_request",
+                "severity": "info",
+                "title": f"Request: {order.get('item')}",
+                "description": f"{order.get('quantity')} requested for {order.get('branch')}",
+                "branch": order.get('branch'),
             })
-
-    # 4. PENDING ORDERS
-    pending_orders = list(orders_collection.find({"status": "pending"}))
-    for order in pending_orders:
-        alerts.append({
-            "id": f"order-{str(order['_id'])}", 
-            "type": "pending_request",
-            "severity": "info",
-            "title": f"📢 New Request: {order.get('item')}",
-            "description": f"Staff at {order.get('branch')} requested {order.get('quantity')} units.",
-            "branch": order.get('branch'),
-            "action_link": "orders"
-        })
 
     # 5. FILTER ACKNOWLEDGED ALERTS
     try:
@@ -929,22 +989,34 @@ def get_replenishment_recommendations():
 
 @app.get("/analytics/overview")
 def analytics_overview():
-    # Fix: Compare Date Strings ("YYYY-MM-DD") instead of Objects
+    target_branch = request.args.get('branch')
+
+    # 🔒 LOCK: If Staff, FORCE target_branch to be their session branch
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        target_branch = session.get("branch")
+
+    # Create Filter
+    match_query = {}
+    if target_branch and target_branch != 'All':
+        match_query["branch"] = target_branch
+
+    # (Keep existing date logic...)
     seven_days_ago = datetime.now() - timedelta(days=7)
-    
-    # Inventory uses Date Objects (usually), Batches use Strings (from HTML form)
-    new_items = inventory_collection.count_documents({
-        "created_at": {"$gte": seven_days_ago}
-    })
-
-    # For batches, we convert the date limit to a string "YYYY-MM-DD"
     date_str = seven_days_ago.strftime("%Y-%m-%d")
-    batches_7d = batches_collection.count_documents({
-        "mfg_date": {"$gte": date_str}
-    })
 
-    total_items = inventory_collection.count_documents({})
-    branches = branches_collection.count_documents({})
+    new_items_query = {**match_query, "created_at": {"$gte": seven_days_ago}}
+    new_items = inventory_collection.count_documents(new_items_query)
+
+    batches_query = {**match_query, "mfg_date": {"$gte": date_str}}
+    batches_7d = batches_collection.count_documents(batches_query)
+
+    total_items = inventory_collection.count_documents(match_query)
+
+    # Branch Count: Staff sees "1", Owner sees Total
+    if target_branch and target_branch != 'All':
+        branches = 1
+    else:
+        branches = branches_collection.count_documents({})
 
     return jsonify({
         "new_items": new_items,
@@ -953,9 +1025,15 @@ def analytics_overview():
         "branches": branches,
     })
 
+# [app.py] - ANALYTICS CHARTS (Movement)
 @app.get("/analytics/movement")
 def analytics_movement():
     target_branch = request.args.get('branch')
+
+    # 🔒 LOCK: Force Staff Branch
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        target_branch = session.get("branch")
+
     query = {}
     if target_branch and target_branch != 'All':
         query["branch"] = target_branch
@@ -997,6 +1075,14 @@ def analytics_movement():
 @app.get("/analytics/movement-monthly")
 def analytics_movement_monthly():
     target_branch = request.args.get('branch')
+
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        target_branch = session.get("branch")
+
+    # Create Filter
+    match_query = {}
+    if target_branch and target_branch != 'All':
+        match_query["branch"] = target_branch
 
     now = datetime.now()
     months = []
@@ -1051,6 +1137,15 @@ def analytics_low_stock():
 
 @app.get("/analytics/top-products")
 def analytics_top_products():
+
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        target_branch = session.get("branch")
+
+    # Create Filter
+    match_query = {}
+    if target_branch and target_branch != 'All':
+        match_query["branch"] = target_branch
+
     pipeline = [
         # 1. Filter: Only count Stock OUT
         {"$match": {"direction": "out"}},
@@ -1248,25 +1343,39 @@ def analytics_connect():
 
 # ---------- COMPLIANCE API ----------
 
+# [app.py] - COMPLIANCE SCORE
 @app.route("/api/compliance/overview", methods=["GET"])
 def get_compliance_overview():
-    # 1. Check for Expired Items (Critical Compliance Issue)
-    today = datetime.now()
-    # Find batches where exp_date < today
-    expired_batches = list(batches_collection.find({
-        "exp_date": {"$lt": today.strftime("%Y-%m-%d")}
-    }))
+    query = {}
     
-    # 2. Check for Low Stock (Operational Compliance Issue)
-    low_stock_items = list(inventory_collection.find(
+    # 🔒 LOCK: Filter by Branch for Staff
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        query["branch"] = session.get("branch")
+
+    today = datetime.now()
+    
+    # Add date filter to the branch query
+    expired_query = {**query, "exp_date": {"$lt": today.strftime("%Y-%m-%d")}}
+    
+    expired_batches = list(batches_collection.find(expired_query))
+    
+    # Low Stock Query
+    # Note: $expr matches don't easily combine with standard dict queries in simple syntax,
+    # but we can filter the results or use an aggregation. For simplicity/safety:
+    all_low_stock = list(inventory_collection.find(
         {"$expr": {"$lte": ["$quantity", "$reorder_level"]}}
     ))
+    
+    # Filter in Python if using complex $expr, or add branch to query if possible
+    # (Since $expr is special, Python filtering is safer for rapid fix):
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        low_stock_items = [i for i in all_low_stock if i.get('branch') == session.get('branch')]
+    else:
+        low_stock_items = all_low_stock
 
     total_issues = len(expired_batches) + len(low_stock_items)
     
-    # Calculate Score (Simple logic: Start at 100, deduct 5 per issue, min 0)
     score = max(0, 100 - (total_issues * 5))
-    
     status = "Excellent"
     if score < 90: status = "Good"
     if score < 70: status = "Warning"
@@ -1280,12 +1389,17 @@ def get_compliance_overview():
         "issues": total_issues
     })
 
+# [app.py] - AUDIT LOGS
 @app.route("/api/compliance/audit-logs", methods=["GET"])
 def get_audit_logs():
-    # Fetch recent stock movements (last 50)
-    logs = list(consumption_collection.find({}).sort("date", -1).limit(50))
+    query = {}
     
-    # Clean up _id for JSON
+    # 🔒 LOCK: Staff only see their branch's activity
+    if session.get("role") == "staff" and session.get("branch") != "All":
+        query["branch"] = session.get("branch")
+
+    logs = list(consumption_collection.find(query).sort("date", -1).limit(50))
+    
     for log in logs:
         log["_id"] = str(log["_id"])
         
@@ -1405,66 +1519,15 @@ def admin_backup_data():
 # Import Groq at the top of your file
 from groq import Groq # <--- ADD THIS TO IMPORTS
 
-# ==========================================
-#  🧠 GROQ (LLAMA 3) ANALYZER
-# ==========================================
-# // //////////////////////////////////////// //
-# //      🧠 LUX AI INVENTORY ANALYZER         //
-# // //////////////////////////////////////// //
-@app.route('/api/ai/analyze', methods=['GET'])
-def ai_analyze_inventory():
-    try:
-        groq_client = Groq(api_key=GROQ_API_KEY) 
-        
-        # Fetch inventory snapshot for the AI
-        cursor = inventory_collection.find({}, {
-            "_id": 0, "name": 1, "quantity": 1, "reorder_level": 1, 
-            "branch": 1
-        }).sort("quantity", 1).limit(20)
-        
-        items = list(cursor)
-        data_str = json.dumps(items)
-
-        # Force the AI to return specific keys for the frontend
-        completion = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "You are LUX, a supply chain AI. Output ONLY JSON. Use these keys: 'insight_text' (2-sentence summary), 'status_badge' ('Healthy', 'Warning', or 'Critical'), 'recommended_order' (list of items needing restock)."
-                },
-                {
-                    "role": "user", 
-                    "content": f"Analyze this inventory and identify risks or trends: {data_str}"
-                }
-            ],
-            model="llama-3.3-70b-versatile",
-            temperature=0.3,
-            response_format={"type": "json_object"}
-        )
-
-        ai_data = json.loads(completion.choices[0].message.content)
-        
-        # Safety: Ensure keys exist even if AI forgets
-        if "insight_text" not in ai_data: ai_data["insight_text"] = "Inventory levels are currently stable across all branches."
-        if "status_badge" not in ai_data: ai_data["status_badge"] = "Healthy"
-
-        return jsonify(ai_data), 200
-
-    except Exception as e:
-        print(f"Groq Analyze Error: {e}")
-        return jsonify({
-            "insight_text": "LUX is currently calculating inventory velocity...", 
-            "status_badge": "Offline"
-        }), 200
-    
-# // ////////////////////////////////////////////////////// //
-# //      🧠 LUX MARKET INTELLIGENCE (FIXED VERSION)          //
-# // ////////////////////////////////////////////////////// //
 
 @app.route('/api/ai/market-intelligence', methods=['GET'])
 def ai_market_intelligence():
+    # 🔒 SECURITY: Block Staff from seeing market pricing analysis
+    if session.get("role") == "staff":
+        return jsonify({"error": "Unauthorized"}), 403
+
     try:
-        # 1. Group price history by Item + Supplier
+        # 1. Group price history by Item + Supplier from the 'batches' collection
         pipeline = [
             {"$sort": {"mfg_date": 1}},
             {"$group": {
@@ -1479,11 +1542,12 @@ def ai_market_intelligence():
             {"$limit": 20}
         ]
         market_data = list(batches_collection.aggregate(pipeline))
-        data_str = json.dumps(market_data)
+        
+        # Convert to string for the AI to read
+        data_str = json.dumps(market_data, default=str)
 
         # 2. LUX Analysis via Groq
-        # ➤ FIX: We use 'groq_client' instead of 'client' to avoid MongoDB conflict.
-        # We also use the global GROQ_API_KEY defined at the top of app.py.
+        # We use the global GROQ_API_KEY defined at the top of app.py
         groq_client = Groq(api_key=GROQ_API_KEY)
         
         completion = groq_client.chat.completions.create(
@@ -1518,14 +1582,18 @@ def ai_market_intelligence():
             response_format={"type": "json_object"}
         )
 
-        # 3. Parse and Return
+        # 3. Parse the JSON response from AI and return to Frontend
         result = json.loads(completion.choices[0].message.content)
         return jsonify(result), 200
 
     except Exception as e:
-        # This will now print the real error if anything else goes wrong
+        # Log the error to the server console for debugging
         print(f"LUX Market Error: {e}")
-        return jsonify({"error": "LUX is currently analyzing supplier catalogs."}), 500
+        # Return a safe error message to the UI so it doesn't crash
+        return jsonify({
+            "market_summary": "LUX is currently analyzing global supplier catalogs. Please try again later.", 
+            "predictions": []
+        }), 200
 # ---------- Run server ----------
 
 def start_background_tasks():
