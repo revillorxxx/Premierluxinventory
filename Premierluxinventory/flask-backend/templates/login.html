@@ -4,127 +4,96 @@
 <head>
   <meta charset="UTF-8" />
   <title>Premierlux | Secure Login</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=Cinzel:wght@600;800&display=swap"
     rel="stylesheet">
-
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
 
   <style>
-    /* --- VARIABLES --- */
+    /* --- THEME VARIABLES --- */
     :root {
       --brand-wine: #5E4074;
-      --brand-dark: #251730;
-      --brand-bg: #F0F2E4;
-      /* Linen Cloud */
+      --brand-wine-light: #7a5c91;
+      --brand-linen: #F5F0F9;
+      --brand-cloud: #FFFFFF;
       --success: #10b981;
-      --text-muted: #94a3b8;
-      --white: #ffffff;
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+      --error: #ef4444;
     }
 
     body {
       font-family: 'Manrope', sans-serif;
+      /* Static, calm gradient background */
+      background: linear-gradient(135deg, #F5F0F9 0%, #EADFF5 100%);
       height: 100vh;
-      width: 100vw;
-      background-color: var(--brand-bg);
-      /* Subtle mesh gradient background */
-      background-image:
-        radial-gradient(at 0% 0%, hsla(275, 30%, 90%, 1) 0, transparent 50%),
-        radial-gradient(at 100% 100%, hsla(275, 30%, 90%, 1) 0, transparent 50%);
       display: flex;
       justify-content: center;
       align-items: center;
       overflow: hidden;
     }
 
-    /* --- LOGIN CARD CONTAINER --- */
-    .login-container {
-      width: 90%;
-      max-width: 1000px;
-      height: 600px;
-      background: var(--white);
+    /* --- LOGIN CARD (No Tilt) --- */
+    .login-card {
+      width: 900px;
+      height: 550px;
+      background: var(--brand-cloud);
       border-radius: 24px;
-      box-shadow:
-        0 25px 50px -12px rgba(94, 64, 116, 0.2),
-        0 0 0 1px rgba(255, 255, 255, 0.5);
+      /* Static shadow, no movement */
+      box-shadow: 0 20px 40px rgba(94, 64, 116, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.8);
       display: flex;
       overflow: hidden;
-      opacity: 0;
-      transform: scale(0.98);
-      animation: popIn 0.5s ease-out forwards;
-      /* Simple Fade In */
     }
 
-    @keyframes popIn {
-      to {
-        opacity: 1;
-        transform: scale(1);
-      }
-    }
-
-    /* --- LEFT SIDE: ARTWORK --- */
+    /* --- LEFT: ARTWORK --- */
     .art-panel {
       flex: 1;
-      background: linear-gradient(135deg, var(--brand-dark) 0%, var(--brand-wine) 100%);
+      background: linear-gradient(135deg, #251730 0%, var(--brand-wine) 100%);
       position: relative;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      text-align: center;
       color: white;
-      padding: 40px;
+      text-align: center;
       overflow: hidden;
     }
 
-    .art-panel h1 {
+    .art-content {
+      position: relative;
+      z-index: 10;
+    }
+
+    .art-content h1 {
       font-family: 'Cinzel', serif;
       font-size: 2.5rem;
-      margin-bottom: 10px;
-      position: relative;
-      z-index: 10;
-      text-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      margin-bottom: 0.5rem;
+      text-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
     }
 
-    .art-panel p {
-      font-size: 0.85rem;
-      opacity: 0.8;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      position: relative;
-      z-index: 10;
-    }
-
-    /* Ambient Blobs */
-    .blob {
+    /* Floating Orbs (Slow & Subtle) */
+    .orb {
       position: absolute;
       border-radius: 50%;
-      filter: blur(60px);
-      opacity: 0.5;
+      filter: blur(50px);
+      opacity: 0.6;
       animation: float 10s infinite ease-in-out;
     }
 
-    .blob-1 {
-      width: 200px;
-      height: 200px;
+    .orb-1 {
+      width: 150px;
+      height: 150px;
       background: #8D6E9E;
-      top: -50px;
-      left: -50px;
+      top: -30px;
+      left: -30px;
     }
 
-    .blob-2 {
-      width: 300px;
-      height: 300px;
+    .orb-2 {
+      width: 250px;
+      height: 250px;
       background: #4A325D;
-      bottom: -80px;
-      right: -80px;
+      bottom: -50px;
+      right: -50px;
       animation-delay: 2s;
     }
 
@@ -136,35 +105,21 @@
       }
 
       50% {
-        transform: translateY(-20px);
+        transform: translateY(-15px);
       }
     }
 
-    /* --- RIGHT SIDE: FORM --- */
+    /* --- RIGHT: FORM --- */
     .form-panel {
       flex: 1;
       padding: 3rem;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      position: relative;
+      background: var(--brand-cloud);
     }
 
-    .form-header h2 {
-      font-family: 'Manrope', sans-serif;
-      font-weight: 800;
-      font-size: 1.8rem;
-      color: var(--brand-wine);
-      margin-bottom: 0.5rem;
-    }
-
-    .form-header p {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      margin-bottom: 2.5rem;
-    }
-
-    /* Input Fields */
+    /* --- FLOATING LABEL INPUTS --- */
     .input-group {
       position: relative;
       margin-bottom: 1.5rem;
@@ -172,186 +127,127 @@
 
     .input-field {
       width: 100%;
-      padding: 16px 45px;
-      /* Space for icons */
-      border: 2px solid #e2e8f0;
-      border-radius: 12px;
+      padding: 1rem 1rem 1rem 2.8rem;
+      /* Left padding for icon */
       font-size: 1rem;
-      font-weight: 600;
       color: var(--brand-wine);
-      background: #f8fafc;
-      transition: all 0.3s;
+      background: #F8FAFC;
+      border: 2px solid transparent;
+      border-radius: 12px;
       outline: none;
-    }
-
-    /* Icons */
-    .input-icon {
-      position: absolute;
-      left: 18px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: #cbd5e1;
-      font-size: 1.1rem;
-      pointer-events: none;
-    }
-
-    /* ➤ FIXED PASSWORD TOGGLE */
-    .password-toggle {
-      position: absolute;
-      right: 15px;
-      /* Hardcoded right position */
-      top: 50%;
-      transform: translateY(-50%);
-      color: #cbd5e1;
-      cursor: pointer;
-      transition: color 0.3s;
-      font-size: 1.1rem;
-      z-index: 50;
-      /* Ensure on top */
-      padding: 5px;
-    }
-
-    .password-toggle:hover {
-      color: var(--brand-wine);
+      transition: all 0.2s;
+      /* Faster, simpler transition */
+      font-weight: 600;
     }
 
     .input-field:focus {
-      background: white;
+      background: #fff;
       border-color: var(--brand-wine);
-      box-shadow: 0 8px 30px rgba(94, 64, 116, 0.1);
+      box-shadow: 0 2px 10px rgba(94, 64, 116, 0.05);
     }
 
-    .input-field:focus+.input-icon {
+    /* Floating Label Logic */
+    .floating-label {
+      position: absolute;
+      left: 2.8rem;
+      top: 1rem;
+      color: #94a3b8;
+      font-size: 0.9rem;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      font-weight: 500;
+    }
+
+    .input-field:focus~.floating-label,
+    .input-field:not(:placeholder-shown)~.floating-label {
+      top: -0.6rem;
+      left: 0.8rem;
+      font-size: 0.75rem;
+      color: var(--brand-wine);
+      background: white;
+      padding: 0 6px;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+
+    .input-icon {
+      position: absolute;
+      left: 1rem;
+      top: 1.1rem;
+      color: #cbd5e1;
+      font-size: 1.1rem;
+      transition: color 0.3s;
+    }
+
+    .input-field:focus~.input-icon {
       color: var(--brand-wine);
     }
 
-    /* Button */
+    /* --- BUTTON --- */
     .btn-login {
       width: 100%;
-      padding: 16px;
-      border-radius: 12px;
-      border: none;
+      padding: 1rem;
       background: var(--brand-wine);
       color: white;
-      font-size: 1rem;
       font-weight: 700;
+      border-radius: 12px;
+      border: none;
       cursor: pointer;
+      font-size: 1rem;
       display: flex;
-      align-items: center;
       justify-content: center;
-      gap: 10px;
-      transition: all 0.3s;
-      box-shadow: 0 10px 20px rgba(94, 64, 116, 0.25);
+      align-items: center;
+      gap: 0.5rem;
+      transition: background-color 0.2s;
+      /* Only animate color */
+      position: relative;
+      overflow: hidden;
     }
 
     .btn-login:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 15px 30px rgba(94, 64, 116, 0.35);
-      background: #4A325D;
+      background: var(--brand-wine-light);
     }
 
     .btn-login:active {
-      transform: scale(0.98);
+      transform: scale(0.99);
     }
 
-    .error-msg {
-      color: #ef4444;
-      font-size: 0.85rem;
-      text-align: center;
-      margin-top: 1rem;
-      font-weight: 600;
-      min-height: 20px;
-    }
-
-    .forgot-link {
-      display: block;
-      text-align: center;
-      margin-top: 1rem;
-      color: var(--text-muted);
-      font-size: 0.85rem;
-      font-weight: 600;
-      text-decoration: none;
-      cursor: pointer;
-      transition: color 0.2s;
-    }
-
-    .forgot-link:hover {
-      color: var(--brand-wine);
-    }
-
-    /* --- FORGOT PASSWORD MODAL --- */
-    #forgot-modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.6);
-      backdrop-filter: blur(4px);
-      z-index: 10000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      opacity: 0;
-      visibility: hidden;
-      transition: all 0.3s;
-    }
-
-    #forgot-modal.active {
-      opacity: 1;
-      visibility: visible;
-    }
-
-    .modal-card {
-      background: white;
-      padding: 2rem;
-      border-radius: 20px;
-      width: 90%;
-      max-width: 400px;
-      text-align: center;
-      transform: scale(0.9);
-      transition: transform 0.3s;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-    }
-
-    #forgot-modal.active .modal-card {
-      transform: scale(1);
-    }
-
-    .modal-icon {
-      width: 60px;
-      height: 60px;
-      background: #EADFF5;
-      color: var(--brand-wine);
+    /* Ripple Effect (Subtle click feedback) */
+    .ripple {
+      position: absolute;
       border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      margin: 0 auto 1rem;
+      background: rgba(255, 255, 255, 0.3);
+      transform: scale(0);
+      animation: ripple 0.6s linear;
+      pointer-events: none;
     }
 
-    /* --- RESPONSIVE --- */
-    @media (max-width: 900px) {
-      .login-container {
+    @keyframes ripple {
+      to {
+        transform: scale(4);
+        opacity: 0;
+      }
+    }
+
+    /* Mobile Responsive */
+    @media (max-width: 768px) {
+      .login-card {
         flex-direction: column;
         height: auto;
+        width: 95%;
       }
 
       .art-panel {
-        padding: 30px;
-        min-height: 180px;
+        padding: 40px 20px;
+        min-height: 150px;
+      }
+
+      .art-content h1 {
+        font-size: 2rem;
       }
 
       .form-panel {
         padding: 2rem;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .art-panel {
-        display: none;
-      }
-
-      .login-container {
-        min-height: 400px;
       }
     }
   </style>
@@ -359,161 +255,132 @@
 
 <body>
 
-  <div class="login-container">
+  <div class="login-card">
 
     <div class="art-panel">
-      <div class="blob blob-1"></div>
-      <div class="blob blob-2"></div>
-      <h1>PREMIERLUX</h1>
-      <p>Inventory Management System</p>
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="art-content">
+        <h1>PREMIERLUX</h1>
+        <p class="text-xs tracking-[0.3em] opacity-80 uppercase">Inventory Management System</p>
+      </div>
     </div>
 
     <div class="form-panel">
-      <div class="form-header">
-        <h2>Welcome Back</h2>
-        <p>Please authenticate to access the dashboard.</p>
+      <div class="mb-8">
+        <h2 class="text-2xl font-extrabold text-[#5E4074]">Welcome Back</h2>
+        <p class="text-sm text-slate-400 font-medium mt-1">Authenticate to access your dashboard.</p>
       </div>
 
       <div class="input-group">
-        <input type="email" id="loginEmail" class="input-field" placeholder="admin@premierlux.com">
-        <i class="fas fa-user input-icon"></i>
-      </div>
-
-      <div class="input-group">
-        <input type="password" id="loginPassword" class="input-field" placeholder="••••••••">
-        <i class="fas fa-lock input-icon"></i>
-        <i class="fas fa-eye password-toggle" id="togglePassBtn" title="Show Password"></i>
-      </div>
-
-      <button id="loginBtn" class="btn-login">
-        <span>Sign In</span>
-        <i class="fas fa-arrow-right"></i>
-      </button>
-
-      <p class="error-msg" id="loginError"></p>
-
-      <a class="forgot-link" onclick="toggleModal(true)">Forgot Password?</a>
-    </div>
-  </div>
-
-  <div id="forgot-modal">
-    <div class="modal-card">
-      <div class="modal-icon"><i class="fas fa-key"></i></div>
-      <h3 style="font-family: 'Manrope', sans-serif; font-weight:800; color:var(--brand-wine); margin-bottom:0.5rem;">
-        Recovery</h3>
-      <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1.5rem;">Enter your email to receive a secure
-        reset link.</p>
-
-      <div class="input-group" style="margin-bottom: 1rem;">
-        <input type="email" class="input-field" placeholder="admin@premierlux.com">
+        <input type="email" id="loginEmail" class="input-field" placeholder=" " autocomplete="off">
+        <label class="floating-label">Email Address</label>
         <i class="fas fa-envelope input-icon"></i>
       </div>
 
-      <button class="btn-login" onclick="simulateReset()" id="resetBtn">Send Link</button>
-      <button onclick="toggleModal(false)"
-        style="margin-top:1rem; background:none; border:none; color:var(--text-muted); font-size:0.85rem; cursor:pointer; font-weight:600;">Cancel</button>
+      <div class="input-group">
+        <input type="password" id="loginPassword" class="input-field" placeholder=" " autocomplete="off">
+        <label class="floating-label">Password</label>
+        <i class="fas fa-lock input-icon"></i>
+        <i class="fas fa-eye absolute right-4 top-4 text-slate-300 cursor-pointer hover:text-[#5E4074] transition"
+          id="togglePass"></i>
+      </div>
+
+      <button id="loginBtn" class="btn-login" onclick="createRipple(event)">
+        <span>Sign In</span>
+        <i class="fas fa-arrow-right text-sm"></i>
+      </button>
+
+      <p id="errorMsg" class="text-center text-rose-500 text-xs font-bold mt-4 h-5"></p>
+
+      <div class="mt-4 text-center">
+        <a href="#" class="text-xs text-slate-400 hover:text-[#5E4074] font-bold transition">Forgot Password?</a>
+      </div>
     </div>
+
   </div>
 
   <script>
     const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-      ? "" 
-      : "https://premierluxinventory.onrender.com";
+      ? "" : "https://premierluxinventory.onrender.com";
 
-    // --- PASSWORD TOGGLE LOGIC ---
-    const passInput = document.getElementById('loginPassword');
-    const toggleBtn = document.getElementById('togglePassBtn');
+    const emailIn = document.getElementById('loginEmail');
+    const passIn = document.getElementById('loginPassword');
+    const loginBtn = document.getElementById('loginBtn');
+    const errorMsg = document.getElementById('errorMsg');
 
-    toggleBtn.addEventListener('click', () => {
-      const type = passInput.getAttribute('type') === 'password' ? 'text' : 'password';
-      passInput.setAttribute('type', type);
-      toggleBtn.className = type === 'password' ? 'fas fa-eye password-toggle' : 'fas fa-eye-slash password-toggle';
+    // --- 1. RIPPLE BUTTON EFFECT (Kept for subtle feedback) ---
+    function createRipple(event) {
+      const button = event.currentTarget;
+      const circle = document.createElement("span");
+      const diameter = Math.max(button.clientWidth, button.clientHeight);
+      const radius = diameter / 2;
+
+      circle.style.width = circle.style.height = `${diameter}px`;
+      circle.style.left = `${event.clientX - button.getBoundingClientRect().left - radius}px`;
+      circle.style.top = `${event.clientY - button.getBoundingClientRect().top - radius}px`;
+      circle.classList.add("ripple");
+
+      const ripple = button.getElementsByClassName("ripple")[0];
+      if (ripple) ripple.remove();
+
+      button.appendChild(circle);
+    }
+
+    // --- 2. PASSWORD TOGGLE ---
+    document.getElementById('togglePass').addEventListener('click', function () {
+      const type = passIn.getAttribute('type') === 'password' ? 'text' : 'password';
+      passIn.setAttribute('type', type);
+      this.classList.toggle('fa-eye');
+      this.classList.toggle('fa-eye-slash');
     });
 
-    // --- MODAL LOGIC ---
-    function toggleModal(show) {
-      const modal = document.getElementById('forgot-modal');
-      if (show) modal.classList.add('active');
-      else modal.classList.remove('active');
-    }
-
-    function simulateReset() {
-      const btn = document.getElementById('resetBtn');
-      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Sending...';
-      btn.style.opacity = '0.7';
-      setTimeout(() => {
-        btn.innerHTML = '<i class="fas fa-check"></i> Link Sent';
-        btn.style.background = "#10b981";
-        setTimeout(() => {
-          toggleModal(false);
-          setTimeout(() => {
-            btn.innerHTML = "Send Link";
-            btn.style.background = "";
-            btn.style.opacity = "1";
-          }, 500);
-        }, 1500);
-      }, 1500);
-    }
-
-    // --- LOGIN LOGIC ---
-    const loginBtn = document.getElementById('loginBtn');
-    const loginError = document.getElementById('loginError');
-    const emailInput = document.getElementById('loginEmail');
-
-    const handleEnter = (e) => { if (e.key === 'Enter') doLogin(); };
-    emailInput.addEventListener('keypress', handleEnter);
-    passInput.addEventListener('keypress', handleEnter);
+    // --- 3. LOGIN LOGIC ---
     loginBtn.addEventListener('click', doLogin);
+    passIn.addEventListener('keypress', (e) => { if (e.key === 'Enter') doLogin(); });
 
     async function doLogin() {
-      const email = emailInput.value.trim();
-      const password = passInput.value.trim();
-      loginError.textContent = "";
+      const email = emailIn.value.trim();
+      const password = passIn.value.trim();
+      errorMsg.textContent = "";
 
-      loginBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Checking...';
-      loginBtn.style.opacity = "0.8";
-
+      // Basic Validation
       if (!email || !password) {
-        loginError.textContent = "Please fill in all fields.";
-        resetBtn();
+        errorMsg.textContent = "Please enter both email and password.";
         return;
       }
+
+      // Loading State
+      const originalText = loginBtn.innerHTML;
+      loginBtn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> Authenticating...`;
+      loginBtn.disabled = true;
 
       try {
         const res = await fetch(`${API_BASE}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({ email, password })
         });
 
         const data = await res.json();
 
         if (!res.ok) {
-          loginError.textContent = data.error || "Authentication Failed.";
-          resetBtn();
-          return;
+          throw new Error(data.error || "Login Failed");
         }
 
-        // ➤ CRITICAL: Save Role
-        localStorage.setItem('user_role', data.role);
-
         // Success State
-        loginBtn.innerHTML = '<i class="fas fa-check"></i> Authorized';
-        loginBtn.style.background = "#10b981";
+        loginBtn.innerHTML = `<i class="fas fa-check"></i> Success`;
+        loginBtn.style.background = "#10b981"; // Success Green
+        localStorage.setItem('user_role', data.role);
 
         setTimeout(() => { window.location.href = "/"; }, 500);
 
-      } catch (e) {
-        loginError.textContent = "Server unreachable.";
-        resetBtn();
+      } catch (err) {
+        errorMsg.textContent = err.message;
+        loginBtn.innerHTML = originalText;
+        loginBtn.disabled = false;
+        loginBtn.style.background = ""; // Reset color
       }
-    }
-
-    function resetBtn() {
-      loginBtn.innerHTML = '<span>Sign In</span><i class="fas fa-arrow-right"></i>';
-      loginBtn.style.opacity = "1";
-      loginBtn.style.background = "";
     }
   </script>
 </body>
